@@ -110,10 +110,14 @@ func buildBatchSystemPrompt(projects []clockify.Project, days []DaySlot) string 
 		if len(d.Events) > 0 {
 			eventsStr = fmt.Sprintf("%s", d.Events)
 		}
-		schedule += fmt.Sprintf("  %s %s: %s–%s (%d min), calendar: %s\n",
+		commitsStr := "none"
+		if len(d.Commits) > 0 {
+			commitsStr = fmt.Sprintf("%s", d.Commits)
+		}
+		schedule += fmt.Sprintf("  %s %s: %s–%s (%d min), calendar: %s, commits: %s\n",
 			d.Date, d.Weekday,
 			d.Start.Format("15:04"), d.End.Format("15:04"),
-			d.Minutes, eventsStr)
+			d.Minutes, eventsStr, commitsStr)
 	}
 
 	return fmt.Sprintf(`You are a time-tracking assistant. Your job is to match work descriptions to Clockify projects and create time entry allocations across multiple days.
@@ -133,6 +137,7 @@ Rules:
 - The "start_time" and "end_time" fields must be "HH:MM" format (24h)
 - Write professional, concise descriptions suitable for Clockify time entries
 - Use calendar events as context clues for what was worked on
+- Use git commits and PRs as additional context clues for what was worked on and which projects to assign
 - If the description is unclear, set clarification to ask for more detail and return empty allocations
 - Set confidence between 0 and 1 based on how well the description matches a project
 

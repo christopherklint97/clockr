@@ -102,6 +102,24 @@ Dates accept `YYYY-MM-DD` or natural language (`monday`, `last friday`, `today`,
 
 Opens a batch TUI for logging multiple days at once. The AI sees all work days in the range (skipping weekends/non-work-days), your calendar events per day, and your description, then produces allocations grouped by day for review. Useful when you've missed logging for several days. Limited to 10 work days per batch.
 
+### GitHub integration
+
+Add GitHub commit and PR context to help Claude match your work to projects:
+
+```sh
+clockr log --github
+clockr log --from monday --to friday --github
+```
+
+On first run, clockr fetches your repos and presents a searchable picker to select which ones to track. Selections are saved to config for reuse. Authentication resolves automatically via `gh auth token`, `GITHUB_TOKEN` env var, or config value.
+
+Manage saved repos:
+
+```sh
+clockr github repos         # list saved repos
+clockr github repos reset   # clear saved repos (re-prompts picker)
+```
+
 ### Calendar integration
 
 Configure an `.ics` calendar source to pre-fill the work description with your meeting/event summaries:
@@ -145,10 +163,13 @@ clockr status
 | `clockr log` | Log a time entry interactively |
 | `clockr log --same` | Repeat last entry for current interval |
 | `clockr log --from DATE --to DATE` | Batch log a date range (supports natural language dates) |
+| `clockr log --github` | Include GitHub commit/PR context (combinable with other flags) |
 | `clockr status` | Show today's logged entries |
 | `clockr projects` | List Clockify projects |
 | `clockr config` | Open config in $EDITOR |
 | `clockr calendar test` | Test calendar integration |
+| `clockr github repos` | List saved GitHub repos |
+| `clockr github repos reset` | Clear saved repos |
 
 ## How it works
 

@@ -17,6 +17,7 @@ import (
 	"github.com/christopherklint97/clockr/internal/calendar"
 	"github.com/christopherklint97/clockr/internal/clockify"
 	"github.com/christopherklint97/clockr/internal/config"
+	"github.com/christopherklint97/clockr/internal/github"
 	"github.com/christopherklint97/clockr/internal/scheduler"
 	"github.com/christopherklint97/clockr/internal/store"
 	"github.com/christopherklint97/clockr/internal/tui"
@@ -76,10 +77,28 @@ var calendarTestCmd = &cobra.Command{
 	RunE:  runCalendarTest,
 }
 
+var githubCmd = &cobra.Command{
+	Use:   "github",
+	Short: "GitHub integration commands",
+}
+
+var githubReposCmd = &cobra.Command{
+	Use:   "repos",
+	Short: "List saved GitHub repos",
+	RunE:  runGitHubRepos,
+}
+
+var githubReposResetCmd = &cobra.Command{
+	Use:   "reset",
+	Short: "Clear saved GitHub repos (re-prompts picker on next --github)",
+	RunE:  runGitHubReposReset,
+}
+
 func init() {
 	logCmd.Flags().Bool("same", false, "Log the same project/description as the last entry")
 	logCmd.Flags().String("from", "", "Start date (YYYY-MM-DD, or natural: monday, last friday, etc.)")
 	logCmd.Flags().String("to", "", "End date (YYYY-MM-DD, or natural: friday, today, etc.)")
+	logCmd.Flags().Bool("github", false, "Include GitHub commit/PR context from saved repos")
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
@@ -90,6 +109,10 @@ func init() {
 
 	calendarCmd.AddCommand(calendarTestCmd)
 	rootCmd.AddCommand(calendarCmd)
+
+	githubReposCmd.AddCommand(githubReposResetCmd)
+	githubCmd.AddCommand(githubReposCmd)
+	rootCmd.AddCommand(githubCmd)
 }
 
 func main() {
@@ -116,7 +139,7 @@ func setupLogger() *slog.Logger {
 }
 
 func newClockifyClient(cfg *config.Config, logger *slog.Logger) *clockify.Client {
-	return clockify.NewClient(cfg.Clockify.APIKey, 1*time.Hour, logger)
+	return clockify.NewClient(cfg.Clockify.APIKey, cfg.Clockify.BaseURL, 1*time.Hour, logger)
 }
 
 func resolveWorkspaceID(ctx context.Context, cfg *config.Config, client *clockify.Client) (string, error) {
@@ -196,6 +219,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	same, _ := cmd.Flags().GetBool("same")
 	fromStr, _ := cmd.Flags().GetString("from")
 	toStr, _ := cmd.Flags().GetString("to")
+	useGitHub, _ := cmd.Flags().GetBool("github")
 
 	// Validate flag combinations
 	if (fromStr != "") != (toStr != "") {
@@ -203,6 +227,9 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	if same && fromStr != "" {
 		return fmt.Errorf("--same cannot be combined with --from/--to")
+	}
+	if same && useGitHub {
+		return fmt.Errorf("--same cannot be combined with --github")
 	}
 
 	cfg, err := loadConfig()
@@ -230,7 +257,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	if fromStr != "" {
-		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr)
+		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub)
 	}
 
 	projects, err := client.GetProjects(ctx, workspaceID)
@@ -256,6 +283,21 @@ func runLog(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Fetch GitHub context if requested
+	if useGitHub {
+		ghItems, err := fetchGitHubContext(ctx, cfg, startTime, endTime)
+		if err != nil {
+			fmt.Printf("Warning: GitHub fetch failed: %v\n", err)
+		} else if len(ghItems) > 0 {
+			ghPrefill := github.FormatPrefill(ghItems)
+			if prefill != "" {
+				prefill += "; " + ghPrefill
+			} else {
+				prefill = ghPrefill
+			}
+		}
+	}
+
 	app := tui.NewApp(startTime, endTime, provider, projects, client, workspaceID, db, interval, prefill)
 	p := tea.NewProgram(app)
 
@@ -271,7 +313,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string) error {
+func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool) error {
 	from, err := parseDate(fromStr)
 	if err != nil {
 		return fmt.Errorf("invalid --from date: %w", err)
@@ -322,6 +364,33 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 				}
 			}
 			prefill = strings.Join(allSummaries, "; ")
+		}
+	}
+
+	// Fetch GitHub commits/PRs and attach to day slots
+	if useGitHub {
+		rangeStart := days[0].Start
+		rangeEnd := days[len(days)-1].End
+		ghItems, err := fetchGitHubContext(ctx, cfg, rangeStart, rangeEnd)
+		if err != nil {
+			fmt.Printf("Warning: GitHub fetch failed: %v\n", err)
+		} else if len(ghItems) > 0 {
+			grouped := github.GroupByDay(ghItems)
+			var allMsgs []string
+			for i, d := range days {
+				if dayItems, ok := grouped[d.Date]; ok {
+					for _, item := range dayItems {
+						days[i].Commits = append(days[i].Commits, item.Message)
+						allMsgs = append(allMsgs, item.Message)
+					}
+				}
+			}
+			ghPrefill := strings.Join(allMsgs, "; ")
+			if prefill != "" {
+				prefill += "; " + ghPrefill
+			} else {
+				prefill = ghPrefill
+			}
 		}
 	}
 
@@ -596,6 +665,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		data := fmt.Sprintf(`[clockify]
 api_key = "%s"
 workspace_id = "%s"
+# base_url = ""  # set for regional servers (e.g. https://euc1.clockify.me/api/v1)
 
 [schedule]
 interval_minutes = %d
@@ -614,6 +684,10 @@ reminder_delay_seconds = %d
 [calendar]
 enabled = %t
 source = "%s"
+
+[github]
+# token = ""  # optional: uses 'gh auth token' or GITHUB_TOKEN env var by default
+# repos = []  # auto-populated after first --github run via repo picker
 `,
 			cfg.Clockify.APIKey,
 			cfg.Clockify.WorkspaceID,
@@ -650,4 +724,79 @@ source = "%s"
 	}
 	_, err = process.Wait()
 	return err
+}
+
+func fetchGitHubContext(ctx context.Context, cfg *config.Config, start, end time.Time) ([]github.CommitContext, error) {
+	token, err := github.ResolveToken(cfg.GitHub.Token)
+	if err != nil {
+		return nil, err
+	}
+
+	logger := setupLogger()
+	ghClient := github.NewClient(token, logger)
+
+	repos := cfg.GitHub.Repos
+	if len(repos) == 0 {
+		// Launch repo picker
+		fmt.Println("Fetching your GitHub repos...")
+		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		allRepos, err := ghClient.GetRepos(fetchCtx)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("fetching GitHub repos: %w", err)
+		}
+		if len(allRepos) == 0 {
+			return nil, fmt.Errorf("no GitHub repos found for your account")
+		}
+
+		picker := tui.NewRepoPickerApp(allRepos)
+		p := tea.NewProgram(picker)
+		if _, err := p.Run(); err != nil {
+			return nil, fmt.Errorf("running repo picker: %w", err)
+		}
+
+		result := picker.GetResult()
+		if result == nil || result.Canceled || len(result.Repos) == 0 {
+			return nil, fmt.Errorf("no repos selected")
+		}
+
+		repos = result.Repos
+		if err := config.SaveGitHubRepos(repos); err != nil {
+			fmt.Printf("Warning: could not save repo selection: %v\n", err)
+		} else {
+			fmt.Printf("Saved %d repos to config.\n", len(repos))
+		}
+	}
+
+	fmt.Printf("Fetching GitHub activity from %d repos...\n", len(repos))
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	return github.Fetch(fetchCtx, ghClient, repos, start, end)
+}
+
+func runGitHubRepos(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	if len(cfg.GitHub.Repos) == 0 {
+		fmt.Println("No GitHub repos saved. Run 'clockr log --github' to select repos.")
+		return nil
+	}
+
+	fmt.Printf("Saved repos (%d):\n\n", len(cfg.GitHub.Repos))
+	for _, r := range cfg.GitHub.Repos {
+		fmt.Printf("  %s\n", r)
+	}
+	return nil
+}
+
+func runGitHubReposReset(cmd *cobra.Command, args []string) error {
+	if err := config.SaveGitHubRepos([]string{}); err != nil {
+		return fmt.Errorf("clearing saved repos: %w", err)
+	}
+	fmt.Println("GitHub repos cleared. Next --github run will prompt for selection.")
+	return nil
 }

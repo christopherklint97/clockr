@@ -9,24 +9,30 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 )
 
-const baseURL = "https://api.clockify.me/api/v1"
+const defaultBaseURL = "https://api.clockify.me/api/v1"
 
 type Client struct {
 	apiKey     string
+	baseURL    string
 	httpClient *http.Client
 	cache      *ProjectCache
 	logger     *slog.Logger
 }
 
-func NewClient(apiKey string, cacheTTL time.Duration, logger *slog.Logger) *Client {
+func NewClient(apiKey string, baseURL string, cacheTTL time.Duration, logger *slog.Logger) *Client {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
 	return &Client{
-		apiKey: apiKey,
+		apiKey:  apiKey,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -45,7 +51,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		reqBody = bytes.NewReader(data)
 	}
 
-	url := baseURL + path
+	url := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)

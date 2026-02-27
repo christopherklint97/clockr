@@ -32,12 +32,15 @@ internal/
     models.go                 — Suggestion, Allocation, DaySlot, BatchAllocation, BatchSuggestion types
   calendar/
     calendar.go               — iCal fetch (URL or file), GroupByDay, FormatPrefill
+  github/
+    client.go                 — GitHub API client (retry on 429/5xx, Bearer auth), repo/commit/PR fetch, GroupByDay, FormatPrefill
   tui/
     app.go                    — Bubbletea root model, view state machine (single entry)
     batch.go                  — BatchApp TUI for multi-day time entry (--from/--to)
     input.go                  — Text input view (shared by single and batch)
     suggestions.go            — Suggestion display with accept/edit/retry/skip
     edit.go                   — Inline allocation editor with fuzzy project search
+    repopicker.go             — Searchable multi-select repo picker for GitHub integration
     styles.go                 — Lipgloss style definitions
   scheduler/
     ticker.go                 — Work-hours-aware tick loop, PID file, failed entry retry
@@ -55,6 +58,7 @@ internal/
 - The batch TUI (`BatchApp`) has its own parallel state machine with the same flow but day-grouped views
 - Clockify credentials can be set via environment variables (`CLOCKIFY_API_KEY`, `CLOCKIFY_WORKSPACE_ID`) for `.env`/direnv support
 - Calendar integration fetches `.ics` events to pre-fill work descriptions; batch mode groups events by day
+- GitHub integration (`--github` flag) fetches commits/PRs from user-selected repos; token resolved via `gh auth token` → `GITHUB_TOKEN` env → config; repos saved to config after first picker selection
 - `--from`/`--to` flags accept `YYYY-MM-DD` or natural language dates (e.g., `monday`, `last friday`, `today`) via `tj/go-naturaldate`; bare weekday names default to past direction
 
 ## Testing

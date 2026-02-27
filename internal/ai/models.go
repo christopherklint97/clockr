@@ -23,6 +23,7 @@ type DaySlot struct {
 	End     time.Time // work end for this day
 	Minutes int       // total work minutes this day
 	Events  []string  // calendar event summaries
+	Commits []string  // git commit/PR context messages
 }
 
 // BatchAllocation is like Allocation but tagged with date and time range.

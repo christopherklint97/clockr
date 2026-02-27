@@ -14,11 +14,18 @@ type Config struct {
 	AI            AIConfig        `toml:"ai"`
 	Notifications NotifyConfig    `toml:"notifications"`
 	Calendar      CalendarConfig  `toml:"calendar"`
+	GitHub        GitHubConfig    `toml:"github"`
+}
+
+type GitHubConfig struct {
+	Token string   `toml:"token"`
+	Repos []string `toml:"repos"`
 }
 
 type ClockifyConfig struct {
 	APIKey      string `toml:"api_key"`
 	WorkspaceID string `toml:"workspace_id"`
+	BaseURL     string `toml:"base_url"`
 }
 
 type ScheduleConfig struct {
@@ -115,6 +122,12 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CLOCKIFY_WORKSPACE_ID"); v != "" {
 		cfg.Clockify.WorkspaceID = v
 	}
+	if v := os.Getenv("CLOCKIFY_BASE_URL"); v != "" {
+		cfg.Clockify.BaseURL = v
+	}
+	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
+		cfg.GitHub.Token = v
+	}
 }
 
 func EnsureConfigDir() error {
@@ -123,4 +136,42 @@ func EnsureConfigDir() error {
 		return err
 	}
 	return os.MkdirAll(dir, 0755)
+}
+
+// SaveGitHubRepos persists the selected GitHub repos to the config file
+// using a read-modify-write approach to preserve other settings.
+func SaveGitHubRepos(repos []string) error {
+	path, err := ConfigPath()
+	if err != nil {
+		return err
+	}
+
+	cfg := make(map[string]any)
+
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading config: %w", err)
+	}
+	if len(data) > 0 {
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("parsing config: %w", err)
+		}
+	}
+
+	gh, ok := cfg["github"].(map[string]any)
+	if !ok {
+		gh = make(map[string]any)
+	}
+	gh["repos"] = repos
+	cfg["github"] = gh
+
+	if err := EnsureConfigDir(); err != nil {
+		return err
+	}
+
+	out, err := toml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	return os.WriteFile(path, out, 0644)
 }
