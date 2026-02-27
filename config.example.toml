@@ -1,0 +1,17 @@
+[clockify]
+api_key = ""
+workspace_id = ""
+
+[schedule]
+interval_minutes = 60
+work_start = "09:00"
+work_end = "17:00"
+work_days = [1, 2, 3, 4, 5]  # Monday=1 through Friday=5
+
+[ai]
+provider = "claude-cli"  # "claude-cli" or "anthropic-api"
+model = "sonnet"
+
+[notifications]
+enabled = true
+reminder_delay_seconds = 300
