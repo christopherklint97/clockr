@@ -28,11 +28,14 @@ internal/
     provider.go               — Provider interface
     claude_cli.go             — Calls `claude` CLI subprocess with --json-schema
     anthropic_api.go          — Stub for direct Anthropic API fallback
-    prompt.go                 — System prompt builder, JSON schema definition
-    models.go                 — Suggestion, Allocation types
+    prompt.go                 — System prompt builder, JSON schema definition (single + batch)
+    models.go                 — Suggestion, Allocation, DaySlot, BatchAllocation, BatchSuggestion types
+  calendar/
+    calendar.go               — iCal fetch (URL or file), GroupByDay, FormatPrefill
   tui/
-    app.go                    — Bubbletea root model, view state machine
-    input.go                  — Text input view
+    app.go                    — Bubbletea root model, view state machine (single entry)
+    batch.go                  — BatchApp TUI for multi-day time entry (--from/--to)
+    input.go                  — Text input view (shared by single and batch)
     suggestions.go            — Suggestion display with accept/edit/retry/skip
     edit.go                   — Inline allocation editor with fuzzy project search
     styles.go                 — Lipgloss style definitions
@@ -49,6 +52,9 @@ internal/
 - The Claude CLI is invoked with `--output-format json --json-schema` for structured output
 - Time entries store both in Clockify and local SQLite; failed Clockify entries are retried automatically
 - The TUI uses a view state machine: input → loading → suggestion → edit → confirmation
+- The batch TUI (`BatchApp`) has its own parallel state machine with the same flow but day-grouped views
+- Clockify credentials can be set via environment variables (`CLOCKIFY_API_KEY`, `CLOCKIFY_WORKSPACE_ID`) for `.env`/direnv support
+- Calendar integration fetches `.ics` events to pre-fill work descriptions; batch mode groups events by day
 
 ## Testing
 
@@ -67,3 +73,4 @@ No test files yet.
 - `github.com/charmbracelet/lipgloss` — TUI styling
 - `github.com/charmbracelet/bubbles` — TUI components (textarea, spinner, textinput)
 - `github.com/gen2brain/beeep` — Desktop notifications
+- `github.com/emersion/go-ical` — iCalendar parsing for calendar integration

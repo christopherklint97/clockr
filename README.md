@@ -55,6 +55,17 @@ model = "sonnet"
 [notifications]
 enabled = true
 reminder_delay_seconds = 300
+
+[calendar]
+enabled = false
+source = ""  # URL or file path to an .ics calendar
+```
+
+You can also set credentials via environment variables (works with `.env` / direnv):
+
+```sh
+export CLOCKIFY_API_KEY="your-api-key-here"
+export CLOCKIFY_WORKSPACE_ID="your-workspace-id"  # optional
 ```
 
 Verify your setup:
@@ -77,6 +88,30 @@ Opens a TUI where you describe your work in plain English. Claude matches it to 
 
 ```sh
 clockr log --same
+```
+
+### Log a date range (batch mode)
+
+```sh
+clockr log --from 2026-02-23 --to 2026-02-27
+```
+
+Opens a batch TUI for logging multiple days at once. The AI sees all work days in the range (skipping weekends/non-work-days), your calendar events per day, and your description, then produces allocations grouped by day for review. Useful when you've missed logging for several days. Limited to 10 work days per batch.
+
+### Calendar integration
+
+Configure an `.ics` calendar source to pre-fill the work description with your meeting/event summaries:
+
+```toml
+[calendar]
+enabled = true
+source = "https://calendar.google.com/calendar/ical/.../basic.ics"
+```
+
+Test it with:
+
+```sh
+clockr calendar test
 ```
 
 ### Run the scheduler
@@ -105,9 +140,11 @@ clockr status
 | `clockr stop` | Stop the running scheduler |
 | `clockr log` | Log a time entry interactively |
 | `clockr log --same` | Repeat last entry for current interval |
+| `clockr log --from DATE --to DATE` | Batch log a date range |
 | `clockr status` | Show today's logged entries |
 | `clockr projects` | List Clockify projects |
 | `clockr config` | Open config in $EDITOR |
+| `clockr calendar test` | Test calendar integration |
 
 ## How it works
 
