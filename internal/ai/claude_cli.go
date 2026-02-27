@@ -62,8 +62,8 @@ func (c *ClaudeCLI) MatchProjectsBatch(ctx context.Context, description string, 
 	return &suggestion, nil
 }
 
-func (c *ClaudeCLI) MatchProjects(ctx context.Context, description string, projects []clockify.Project, interval time.Duration) (*Suggestion, error) {
-	systemPrompt := buildSystemPrompt(projects, interval)
+func (c *ClaudeCLI) MatchProjects(ctx context.Context, description string, projects []clockify.Project, interval time.Duration, contextItems []string) (*Suggestion, error) {
+	systemPrompt := buildSystemPrompt(projects, interval, contextItems)
 	userPrompt := buildUserPrompt(description)
 
 	cmd := exec.CommandContext(ctx, "claude",

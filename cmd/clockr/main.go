@@ -271,34 +271,34 @@ func runLog(cmd *cobra.Command, args []string) error {
 	startTime := now.Add(-interval)
 	endTime := now
 
-	prefill := ""
+	var contextItems []string
 	if cfg.Calendar.Enabled && cfg.Calendar.Source != "" {
+		fmt.Println("Fetching calendar events...")
 		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		events, err := calendar.Fetch(fetchCtx, cfg.Calendar.Source, startTime, endTime)
 		cancel()
 		if err != nil {
 			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
 		} else {
-			prefill = calendar.FormatPrefill(events)
-		}
-	}
-
-	// Fetch GitHub context if requested
-	if useGitHub {
-		ghItems, err := fetchGitHubContext(ctx, cfg, startTime, endTime)
-		if err != nil {
-			fmt.Printf("Warning: GitHub fetch failed: %v\n", err)
-		} else if len(ghItems) > 0 {
-			ghPrefill := github.FormatPrefill(ghItems)
-			if prefill != "" {
-				prefill += "; " + ghPrefill
-			} else {
-				prefill = ghPrefill
+			for _, e := range events {
+				contextItems = append(contextItems, e.Summary)
 			}
 		}
 	}
 
-	app := tui.NewApp(startTime, endTime, provider, projects, client, workspaceID, db, interval, prefill)
+	// Fetch GitHub context if requested (sent to AI via system prompt, not textarea)
+	if useGitHub {
+		ghItems, err := fetchGitHubContext(ctx, cfg, startTime, endTime)
+		if err != nil {
+			fmt.Printf("Warning: GitHub fetch failed: %v\n", err)
+		} else {
+			for _, item := range ghItems {
+				contextItems = append(contextItems, item.Message)
+			}
+		}
+	}
+
+	app := tui.NewApp(startTime, endTime, provider, projects, client, workspaceID, db, interval, contextItems)
 	p := tea.NewProgram(app)
 
 	if _, err := p.Run(); err != nil {
@@ -342,9 +342,9 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 		return fmt.Errorf("fetching projects: %w", err)
 	}
 
-	// Fetch calendar events for the full range and attach to day slots
-	prefill := ""
+	// Fetch calendar events for the full range and attach to day slots (per-day AI context)
 	if cfg.Calendar.Enabled && cfg.Calendar.Source != "" {
+		fmt.Println("Fetching calendar events...")
 		rangeStart := days[0].Start
 		rangeEnd := days[len(days)-1].End
 		fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -354,20 +354,17 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
 		} else {
 			grouped := calendar.GroupByDay(events)
-			var allSummaries []string
 			for i, d := range days {
 				if dayEvents, ok := grouped[d.Date]; ok {
 					for _, e := range dayEvents {
 						days[i].Events = append(days[i].Events, e.Summary)
-						allSummaries = append(allSummaries, e.Summary)
 					}
 				}
 			}
-			prefill = strings.Join(allSummaries, "; ")
 		}
 	}
 
-	// Fetch GitHub commits/PRs and attach to day slots
+	// Fetch GitHub commits/PRs and attach to day slots (sent to AI via system prompt, not textarea)
 	if useGitHub {
 		rangeStart := days[0].Start
 		rangeEnd := days[len(days)-1].End
@@ -376,26 +373,18 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 			fmt.Printf("Warning: GitHub fetch failed: %v\n", err)
 		} else if len(ghItems) > 0 {
 			grouped := github.GroupByDay(ghItems)
-			var allMsgs []string
 			for i, d := range days {
 				if dayItems, ok := grouped[d.Date]; ok {
 					for _, item := range dayItems {
 						days[i].Commits = append(days[i].Commits, item.Message)
-						allMsgs = append(allMsgs, item.Message)
 					}
 				}
-			}
-			ghPrefill := strings.Join(allMsgs, "; ")
-			if prefill != "" {
-				prefill += "; " + ghPrefill
-			} else {
-				prefill = ghPrefill
 			}
 		}
 	}
 
 	provider := newAIProvider(cfg)
-	app := tui.NewBatchApp(days, provider, projects, client, workspaceID, db, prefill)
+	app := tui.NewBatchApp(days, provider, projects, client, workspaceID, db)
 	p := tea.NewProgram(app)
 
 	if _, err := p.Run(); err != nil {

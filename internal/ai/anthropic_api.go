@@ -18,7 +18,7 @@ func NewAnthropicAPI(apiKey, model string) *AnthropicAPI {
 	return &AnthropicAPI{APIKey: apiKey, Model: model}
 }
 
-func (a *AnthropicAPI) MatchProjects(ctx context.Context, description string, projects []clockify.Project, interval time.Duration) (*Suggestion, error) {
+func (a *AnthropicAPI) MatchProjects(ctx context.Context, description string, projects []clockify.Project, interval time.Duration, contextItems []string) (*Suggestion, error) {
 	return nil, fmt.Errorf("anthropic API provider not yet implemented — use claude-cli provider instead")
 }
 

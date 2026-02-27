@@ -3,6 +3,7 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/christopherklint97/clockr/internal/clockify"
@@ -30,7 +31,7 @@ const jsonSchema = `{
   "required": ["allocations"]
 }`
 
-func buildSystemPrompt(projects []clockify.Project, interval time.Duration) string {
+func buildSystemPrompt(projects []clockify.Project, interval time.Duration, contextItems []string) string {
 	type projectInfo struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -44,23 +45,38 @@ func buildSystemPrompt(projects []clockify.Project, interval time.Duration) stri
 	projectsJSON, _ := json.Marshal(pList)
 	totalMinutes := int(interval.Minutes())
 
+	commitsSection := ""
+	if len(contextItems) > 0 {
+		commitsSection = fmt.Sprintf("\nContext (calendar events, commits, PRs):\n%s\n", formatCommitsList(contextItems))
+	}
+
 	return fmt.Sprintf(`You are a time-tracking assistant. Your job is to match work descriptions to Clockify projects and create time entry allocations.
 
 Available projects:
 %s
-
-Rules:
+%sRules:
 - The time period is %d minutes total
 - Each allocation must be at least 30 minutes
 - Maximum 2 allocations per hour
 - Allocations must sum to exactly %d minutes
 - Use exact project IDs and names from the list above
 - Write professional, concise descriptions suitable for Clockify time entries
+- Use git commits and PRs as additional context clues for what was worked on and which projects to assign
 - If the description is unclear, set clarification to ask for more detail and return empty allocations
 - Set confidence between 0 and 1 based on how well the description matches a project
 - If you cannot match to any project with reasonable confidence, set clarification to explain why
 
-Return valid JSON matching the required schema.`, string(projectsJSON), totalMinutes, totalMinutes)
+Return valid JSON matching the required schema.`, string(projectsJSON), commitsSection, totalMinutes, totalMinutes)
+}
+
+func formatCommitsList(commits []string) string {
+	var sb strings.Builder
+	for _, c := range commits {
+		sb.WriteString("  - ")
+		sb.WriteString(c)
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 func buildUserPrompt(description string) string {

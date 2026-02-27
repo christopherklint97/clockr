@@ -60,7 +60,6 @@ func NewBatchApp(
 	client *clockify.Client,
 	workspaceID string,
 	db *store.DB,
-	prefill string,
 ) *BatchApp {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -75,7 +74,7 @@ func NewBatchApp(
 
 	return &BatchApp{
 		state:       batchInputView,
-		input:       newInputModel(timeInfo, prefill),
+		input:       newInputModel(timeInfo),
 		spinner:     s,
 		days:        days,
 		provider:    provider,
@@ -91,6 +90,12 @@ func (a *BatchApp) Init() tea.Cmd {
 }
 
 func (a *BatchApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		var cmd tea.Cmd
+		a.input, cmd = a.input.Update(wsMsg)
+		return a, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -172,7 +177,9 @@ func (a *BatchApp) updateSuggestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case "r":
 			a.state = batchInputView
-			a.input = newInputModel(a.input.timeInfo, "")
+			newInput := newInputModel(a.input.timeInfo)
+			newInput, _ = newInput.Update(tea.WindowSizeMsg{Width: a.input.width, Height: a.input.height})
+			a.input = newInput
 			return a, a.input.textarea.Focus()
 		case "s":
 			a.result = &Result{Skipped: true}

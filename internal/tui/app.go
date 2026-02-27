@@ -54,6 +54,7 @@ type App struct {
 	workspaceID string
 	db          *store.DB
 	interval    time.Duration
+	contextItems []string
 }
 
 func NewApp(
@@ -64,7 +65,7 @@ func NewApp(
 	workspaceID string,
 	db *store.DB,
 	interval time.Duration,
-	prefill string,
+	contextItems []string,
 ) *App {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -77,7 +78,7 @@ func NewApp(
 
 	return &App{
 		state:       inputView,
-		input:       newInputModel(timeInfo, prefill),
+		input:       newInputModel(timeInfo),
 		spinner:     s,
 		startTime:   startTime,
 		endTime:     endTime,
@@ -87,6 +88,7 @@ func NewApp(
 		workspaceID: workspaceID,
 		db:          db,
 		interval:    interval,
+		contextItems: contextItems,
 	}
 }
 
@@ -95,6 +97,12 @@ func (a *App) Init() tea.Cmd {
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		var cmd tea.Cmd
+		a.input, cmd = a.input.Update(wsMsg)
+		return a, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -176,7 +184,9 @@ func (a *App) updateSuggestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case "r":
 			a.state = inputView
-			a.input = newInputModel(a.input.timeInfo, "")
+			newInput := newInputModel(a.input.timeInfo)
+			newInput, _ = newInput.Update(tea.WindowSizeMsg{Width: a.input.width, Height: a.input.height})
+			a.input = newInput
 			return a, a.input.textarea.Focus()
 		case "s":
 			a.result = &Result{Skipped: true}
@@ -244,7 +254,7 @@ func (a *App) queryAI(description string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		suggestion, err := a.provider.MatchProjects(ctx, description, a.projects, a.interval)
+		suggestion, err := a.provider.MatchProjects(ctx, description, a.projects, a.interval, a.contextItems)
 		return aiResponseMsg{suggestion: suggestion, err: err}
 	}
 }
