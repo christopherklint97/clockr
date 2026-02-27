@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/christopherklint97/clockr/internal/ai"
+	"github.com/christopherklint97/clockr/internal/calendar"
 	"github.com/christopherklint97/clockr/internal/clockify"
 	"github.com/christopherklint97/clockr/internal/config"
 	"github.com/christopherklint97/clockr/internal/store"
@@ -81,7 +82,19 @@ func (s *Scheduler) prompt(ctx context.Context, tickTime time.Time, interval tim
 	startTime := tickTime.Add(-interval)
 	endTime := tickTime
 
-	app := tui.NewApp(startTime, endTime, s.provider, projects, s.client, s.workspaceID, s.db, interval)
+	prefill := ""
+	if s.cfg.Calendar.Enabled && s.cfg.Calendar.Source != "" {
+		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		events, err := calendar.Fetch(fetchCtx, s.cfg.Calendar.Source, startTime, endTime)
+		cancel()
+		if err != nil {
+			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
+		} else {
+			prefill = calendar.FormatPrefill(events)
+		}
+	}
+
+	app := tui.NewApp(startTime, endTime, s.provider, projects, s.client, s.workspaceID, s.db, interval, prefill)
 	p := tea.NewProgram(app)
 
 	if _, err := p.Run(); err != nil {

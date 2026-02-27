@@ -10,7 +10,7 @@ type inputModel struct {
 	timeInfo string
 }
 
-func newInputModel(timeInfo string) inputModel {
+func newInputModel(timeInfo string, prefill string) inputModel {
 	ta := textarea.New()
 	ta.Placeholder = "Describe what you worked on..."
 	ta.Focus()
@@ -18,6 +18,10 @@ func newInputModel(timeInfo string) inputModel {
 	ta.SetWidth(60)
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
+
+	if prefill != "" {
+		ta.SetValue(prefill)
+	}
 
 	return inputModel{
 		textarea: ta,

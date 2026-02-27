@@ -64,6 +64,7 @@ func NewApp(
 	workspaceID string,
 	db *store.DB,
 	interval time.Duration,
+	prefill string,
 ) *App {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -76,7 +77,7 @@ func NewApp(
 
 	return &App{
 		state:       inputView,
-		input:       newInputModel(timeInfo),
+		input:       newInputModel(timeInfo, prefill),
 		spinner:     s,
 		startTime:   startTime,
 		endTime:     endTime,
@@ -175,7 +176,7 @@ func (a *App) updateSuggestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case "r":
 			a.state = inputView
-			a.input = newInputModel(a.input.timeInfo)
+			a.input = newInputModel(a.input.timeInfo, "")
 			return a, a.input.textarea.Focus()
 		case "s":
 			a.result = &Result{Skipped: true}

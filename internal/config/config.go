@@ -9,10 +9,11 @@ import (
 )
 
 type Config struct {
-	Clockify  ClockifyConfig  `toml:"clockify"`
-	Schedule  ScheduleConfig  `toml:"schedule"`
-	AI        AIConfig        `toml:"ai"`
-	Notifications NotifyConfig `toml:"notifications"`
+	Clockify      ClockifyConfig  `toml:"clockify"`
+	Schedule      ScheduleConfig  `toml:"schedule"`
+	AI            AIConfig        `toml:"ai"`
+	Notifications NotifyConfig    `toml:"notifications"`
+	Calendar      CalendarConfig  `toml:"calendar"`
 }
 
 type ClockifyConfig struct {
@@ -37,6 +38,11 @@ type NotifyConfig struct {
 	ReminderDelay int  `toml:"reminder_delay_seconds"`
 }
 
+type CalendarConfig struct {
+	Enabled bool   `toml:"enabled"`
+	Source  string `toml:"source"`
+}
+
 func DefaultConfig() Config {
 	return Config{
 		Schedule: ScheduleConfig{
@@ -52,6 +58,10 @@ func DefaultConfig() Config {
 		Notifications: NotifyConfig{
 			Enabled:       true,
 			ReminderDelay: 300,
+		},
+		Calendar: CalendarConfig{
+			Enabled: false,
+			Source:  "",
 		},
 	}
 }

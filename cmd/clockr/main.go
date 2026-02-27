@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
-
 	"os/signal"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/christopherklint97/clockr/internal/ai"
+	"github.com/christopherklint97/clockr/internal/calendar"
 	"github.com/christopherklint97/clockr/internal/clockify"
 	"github.com/christopherklint97/clockr/internal/config"
 	"github.com/christopherklint97/clockr/internal/scheduler"
@@ -61,6 +61,17 @@ var configCmd = &cobra.Command{
 	RunE:  runConfig,
 }
 
+var calendarCmd = &cobra.Command{
+	Use:   "calendar",
+	Short: "Calendar integration commands",
+}
+
+var calendarTestCmd = &cobra.Command{
+	Use:   "test",
+	Short: "Test calendar integration by fetching upcoming events",
+	RunE:  runCalendarTest,
+}
+
 func init() {
 	logCmd.Flags().Bool("same", false, "Log the same project/description as the last entry")
 
@@ -70,6 +81,9 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(configCmd)
+
+	calendarCmd.AddCommand(calendarTestCmd)
+	rootCmd.AddCommand(calendarCmd)
 }
 
 func main() {
@@ -199,7 +213,19 @@ func runLog(cmd *cobra.Command, args []string) error {
 	startTime := now.Add(-interval)
 	endTime := now
 
-	app := tui.NewApp(startTime, endTime, provider, projects, client, workspaceID, db, interval)
+	prefill := ""
+	if cfg.Calendar.Enabled && cfg.Calendar.Source != "" {
+		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		events, err := calendar.Fetch(fetchCtx, cfg.Calendar.Source, startTime, endTime)
+		cancel()
+		if err != nil {
+			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
+		} else {
+			prefill = calendar.FormatPrefill(events)
+		}
+	}
+
+	app := tui.NewApp(startTime, endTime, provider, projects, client, workspaceID, db, interval, prefill)
 	p := tea.NewProgram(app)
 
 	if _, err := p.Run(); err != nil {
@@ -341,6 +367,46 @@ func runProjects(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runCalendarTest(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	if !cfg.Calendar.Enabled || cfg.Calendar.Source == "" {
+		return fmt.Errorf("calendar not configured — add [calendar] section to config with enabled = true and source = \"...\"")
+	}
+
+	now := time.Now()
+	windowStart := now.Add(-24 * time.Hour)
+	windowEnd := now.Add(7 * 24 * time.Hour)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	events, err := calendar.Fetch(ctx, cfg.Calendar.Source, windowStart, windowEnd)
+	if err != nil {
+		return fmt.Errorf("fetching calendar: %w", err)
+	}
+
+	if len(events) == 0 {
+		fmt.Println("No events found in the past 24h to next 7 days.")
+		return nil
+	}
+
+	fmt.Printf("Found %d events:\n\n", len(events))
+	for _, e := range events {
+		fmt.Printf("  %s – %s  %s\n",
+			e.StartTime.Local().Format("Mon Jan 02 15:04"),
+			e.EndTime.Local().Format("15:04"),
+			e.Summary,
+		)
+	}
+
+	fmt.Printf("\nPrefill text: %s\n", calendar.FormatPrefill(events))
+	return nil
+}
+
 func runConfig(cmd *cobra.Command, args []string) error {
 	if err := config.EnsureConfigDir(); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
@@ -371,6 +437,10 @@ model = "%s"
 [notifications]
 enabled = %t
 reminder_delay_seconds = %d
+
+[calendar]
+enabled = %t
+source = "%s"
 `,
 			cfg.Clockify.APIKey,
 			cfg.Clockify.WorkspaceID,
@@ -381,6 +451,8 @@ reminder_delay_seconds = %d
 			cfg.AI.Model,
 			cfg.Notifications.Enabled,
 			cfg.Notifications.ReminderDelay,
+			cfg.Calendar.Enabled,
+			cfg.Calendar.Source,
 		)
 		if err := os.WriteFile(configPath, []byte(data), 0644); err != nil {
 			return fmt.Errorf("writing default config: %w", err)
