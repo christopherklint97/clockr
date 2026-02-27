@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"time"
@@ -17,15 +18,20 @@ type Client struct {
 	apiKey     string
 	httpClient *http.Client
 	cache      *ProjectCache
+	logger     *slog.Logger
 }
 
-func NewClient(apiKey string, cacheTTL time.Duration) *Client {
+func NewClient(apiKey string, cacheTTL time.Duration, logger *slog.Logger) *Client {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		cache: NewProjectCache(cacheTTL),
+		cache:  NewProjectCache(cacheTTL),
+		logger: logger,
 	}
 }
 
@@ -54,6 +60,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		resp, err = c.httpClient.Do(req)
 		if err != nil {
 			if attempt == maxRetries {
+				c.logger.Error("API request transport error", "method", method, "path", path, "error", err)
 				return nil, fmt.Errorf("sending request: %w", err)
 			}
 			time.Sleep(backoff(attempt))
@@ -63,6 +70,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
 			resp.Body.Close()
 			if attempt == maxRetries {
+				c.logger.Error("API request failed after retries", "method", method, "path", path, "status", resp.StatusCode, "attempts", maxRetries+1)
 				return nil, fmt.Errorf("API returned status %d after %d retries", resp.StatusCode, maxRetries)
 			}
 			time.Sleep(backoff(attempt))
@@ -78,6 +86,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.logger.Error("API request failed", "method", method, "path", path, "status", resp.StatusCode, "response", truncate(string(respBody), 200))
 		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
@@ -102,7 +111,17 @@ func (c *Client) GetUser(ctx context.Context) (*User, error) {
 	return &user, nil
 }
 
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
 func (c *Client) GetProjects(ctx context.Context, workspaceID string) ([]Project, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspace ID is empty — set workspace_id in config or CLOCKIFY_WORKSPACE_ID env var")
+	}
 	if cached := c.cache.Get(); cached != nil {
 		return cached, nil
 	}
@@ -136,6 +155,9 @@ func (c *Client) GetProjects(ctx context.Context, workspaceID string) ([]Project
 }
 
 func (c *Client) CreateTimeEntry(ctx context.Context, workspaceID string, entry TimeEntryRequest) (*TimeEntry, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspace ID is empty — set workspace_id in config or CLOCKIFY_WORKSPACE_ID env var")
+	}
 	path := fmt.Sprintf("/workspaces/%s/time-entries", workspaceID)
 	data, err := c.doRequest(ctx, http.MethodPost, path, entry)
 	if err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -108,8 +109,14 @@ func loadConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
-func newClockifyClient(cfg *config.Config) *clockify.Client {
-	return clockify.NewClient(cfg.Clockify.APIKey, 1*time.Hour)
+func setupLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelError,
+	}))
+}
+
+func newClockifyClient(cfg *config.Config, logger *slog.Logger) *clockify.Client {
+	return clockify.NewClient(cfg.Clockify.APIKey, 1*time.Hour, logger)
 }
 
 func resolveWorkspaceID(ctx context.Context, cfg *config.Config, client *clockify.Client) (string, error) {
@@ -119,6 +126,9 @@ func resolveWorkspaceID(ctx context.Context, cfg *config.Config, client *clockif
 	user, err := client.GetUser(ctx)
 	if err != nil {
 		return "", fmt.Errorf("getting user info: %w", err)
+	}
+	if user.DefaultWorkspace == "" {
+		return "", fmt.Errorf("workspace ID not configured and user has no default workspace — set workspace_id in config or CLOCKIFY_WORKSPACE_ID env var")
 	}
 	return user.DefaultWorkspace, nil
 }
@@ -139,7 +149,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	client := newClockifyClient(cfg)
+	logger := setupLogger()
+	client := newClockifyClient(cfg, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -205,7 +216,8 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	client := newClockifyClient(cfg)
+	logger := setupLogger()
+	client := newClockifyClient(cfg, logger)
 	ctx := context.Background()
 
 	workspaceID, err := resolveWorkspaceID(ctx, cfg, client)
@@ -501,7 +513,8 @@ func runProjects(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := newClockifyClient(cfg)
+	logger := setupLogger()
+	client := newClockifyClient(cfg, logger)
 	ctx := context.Background()
 
 	workspaceID, err := resolveWorkspaceID(ctx, cfg, client)
