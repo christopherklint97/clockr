@@ -82,6 +82,7 @@ func Load() (*Config, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg := DefaultConfig()
+			applyEnvOverrides(&cfg)
 			return &cfg, nil
 		}
 		return nil, fmt.Errorf("reading config file: %w", err)
@@ -92,7 +93,18 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
+	applyEnvOverrides(&cfg)
+
 	return &cfg, nil
+}
+
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("CLOCKIFY_API_KEY"); v != "" {
+		cfg.Clockify.APIKey = v
+	}
+	if v := os.Getenv("CLOCKIFY_WORKSPACE_ID"); v != "" {
+		cfg.Clockify.WorkspaceID = v
+	}
 }
 
 func EnsureConfigDir() error {
