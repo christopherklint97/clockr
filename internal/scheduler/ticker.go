@@ -82,19 +82,22 @@ func (s *Scheduler) prompt(ctx context.Context, tickTime time.Time, interval tim
 	startTime := tickTime.Add(-interval)
 	endTime := tickTime
 
-	prefill := ""
+	var contextItems []string
 	if s.cfg.Calendar.Enabled && s.cfg.Calendar.Source != "" {
+		fmt.Println("Fetching calendar events...")
 		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		events, err := calendar.Fetch(fetchCtx, s.cfg.Calendar.Source, startTime, endTime)
 		cancel()
 		if err != nil {
 			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
 		} else {
-			prefill = calendar.FormatPrefill(events)
+			for _, e := range events {
+				contextItems = append(contextItems, e.Summary)
+			}
 		}
 	}
 
-	app := tui.NewApp(startTime, endTime, s.provider, projects, s.client, s.workspaceID, s.db, interval, prefill)
+	app := tui.NewApp(startTime, endTime, s.provider, projects, s.client, s.workspaceID, s.db, interval, contextItems)
 	p := tea.NewProgram(app)
 
 	if _, err := p.Run(); err != nil {
