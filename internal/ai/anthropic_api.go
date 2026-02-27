@@ -21,3 +21,7 @@ func NewAnthropicAPI(apiKey, model string) *AnthropicAPI {
 func (a *AnthropicAPI) MatchProjects(ctx context.Context, description string, projects []clockify.Project, interval time.Duration) (*Suggestion, error) {
 	return nil, fmt.Errorf("anthropic API provider not yet implemented — use claude-cli provider instead")
 }
+
+func (a *AnthropicAPI) MatchProjectsBatch(ctx context.Context, description string, projects []clockify.Project, days []DaySlot) (*BatchSuggestion, error) {
+	return nil, fmt.Errorf("anthropic API batch provider not yet implemented — use claude-cli provider instead")
+}

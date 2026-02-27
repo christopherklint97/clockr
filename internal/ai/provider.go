@@ -9,4 +9,5 @@ import (
 
 type Provider interface {
 	MatchProjects(ctx context.Context, description string, projects []clockify.Project, interval time.Duration) (*Suggestion, error)
+	MatchProjectsBatch(ctx context.Context, description string, projects []clockify.Project, days []DaySlot) (*BatchSuggestion, error)
 }

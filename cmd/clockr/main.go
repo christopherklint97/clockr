@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -74,6 +76,8 @@ var calendarTestCmd = &cobra.Command{
 
 func init() {
 	logCmd.Flags().Bool("same", false, "Log the same project/description as the last entry")
+	logCmd.Flags().String("from", "", "Start date for batch logging (YYYY-MM-DD)")
+	logCmd.Flags().String("to", "", "End date for batch logging (YYYY-MM-DD)")
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
@@ -178,6 +182,16 @@ func runStop(cmd *cobra.Command, args []string) error {
 
 func runLog(cmd *cobra.Command, args []string) error {
 	same, _ := cmd.Flags().GetBool("same")
+	fromStr, _ := cmd.Flags().GetString("from")
+	toStr, _ := cmd.Flags().GetString("to")
+
+	// Validate flag combinations
+	if (fromStr != "") != (toStr != "") {
+		return fmt.Errorf("both --from and --to must be provided together")
+	}
+	if same && fromStr != "" {
+		return fmt.Errorf("--same cannot be combined with --from/--to")
+	}
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -200,6 +214,10 @@ func runLog(cmd *cobra.Command, args []string) error {
 
 	if same {
 		return runLogSame(ctx, cfg, client, workspaceID, db)
+	}
+
+	if fromStr != "" {
+		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr)
 	}
 
 	projects, err := client.GetProjects(ctx, workspaceID)
@@ -238,6 +256,135 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string) error {
+	from, err := time.ParseInLocation("2006-01-02", fromStr, time.Now().Location())
+	if err != nil {
+		return fmt.Errorf("invalid --from date %q (expected YYYY-MM-DD): %w", fromStr, err)
+	}
+	to, err := time.ParseInLocation("2006-01-02", toStr, time.Now().Location())
+	if err != nil {
+		return fmt.Errorf("invalid --to date %q (expected YYYY-MM-DD): %w", toStr, err)
+	}
+	if to.Before(from) {
+		return fmt.Errorf("--to date must be on or after --from date")
+	}
+
+	days, err := buildDaySlots(cfg, from, to)
+	if err != nil {
+		return err
+	}
+	if len(days) == 0 {
+		return fmt.Errorf("no work days in the range %s to %s (check work_days config)", fromStr, toStr)
+	}
+	if len(days) > 10 {
+		return fmt.Errorf("batch limited to 10 work days, got %d (narrow the date range)", len(days))
+	}
+
+	projects, err := client.GetProjects(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("fetching projects: %w", err)
+	}
+
+	// Fetch calendar events for the full range and attach to day slots
+	prefill := ""
+	if cfg.Calendar.Enabled && cfg.Calendar.Source != "" {
+		rangeStart := days[0].Start
+		rangeEnd := days[len(days)-1].End
+		fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		events, err := calendar.Fetch(fetchCtx, cfg.Calendar.Source, rangeStart, rangeEnd)
+		cancel()
+		if err != nil {
+			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
+		} else {
+			grouped := calendar.GroupByDay(events)
+			var allSummaries []string
+			for i, d := range days {
+				if dayEvents, ok := grouped[d.Date]; ok {
+					for _, e := range dayEvents {
+						days[i].Events = append(days[i].Events, e.Summary)
+						allSummaries = append(allSummaries, e.Summary)
+					}
+				}
+			}
+			prefill = strings.Join(allSummaries, "; ")
+		}
+	}
+
+	provider := newAIProvider(cfg)
+	app := tui.NewBatchApp(days, provider, projects, client, workspaceID, db, prefill)
+	p := tea.NewProgram(app)
+
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("running batch TUI: %w", err)
+	}
+
+	result := app.GetResult()
+	if result != nil && result.Skipped {
+		fmt.Println("Batch entry skipped.")
+	}
+
+	return nil
+}
+
+func buildDaySlots(cfg *config.Config, from, to time.Time) ([]ai.DaySlot, error) {
+	workStartH, workStartM, err := parseTimeConfig(cfg.Schedule.WorkStart)
+	if err != nil {
+		return nil, fmt.Errorf("parsing work_start: %w", err)
+	}
+	workEndH, workEndM, err := parseTimeConfig(cfg.Schedule.WorkEnd)
+	if err != nil {
+		return nil, fmt.Errorf("parsing work_end: %w", err)
+	}
+
+	workDays := make(map[int]bool)
+	for _, d := range cfg.Schedule.WorkDays {
+		workDays[d] = true
+	}
+
+	var days []ai.DaySlot
+	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+		// Convert Go weekday (Sun=0) to ISO weekday (Mon=1..Sun=7)
+		goWd := int(d.Weekday())
+		isoWd := goWd
+		if goWd == 0 {
+			isoWd = 7
+		}
+		if !workDays[isoWd] {
+			continue
+		}
+
+		start := time.Date(d.Year(), d.Month(), d.Day(), workStartH, workStartM, 0, 0, d.Location())
+		end := time.Date(d.Year(), d.Month(), d.Day(), workEndH, workEndM, 0, 0, d.Location())
+		minutes := int(end.Sub(start).Minutes())
+
+		days = append(days, ai.DaySlot{
+			Date:    d.Format("2006-01-02"),
+			Weekday: d.Weekday().String(),
+			Start:   start,
+			End:     end,
+			Minutes: minutes,
+		})
+	}
+
+	return days, nil
+}
+
+func parseTimeConfig(s string) (int, int, error) {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("expected HH:MM format, got %q", s)
+	}
+	h, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid hour in %q: %w", s, err)
+	}
+	m, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid minute in %q: %w", s, err)
+	}
+	return h, m, nil
 }
 
 func runLogSame(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB) error {

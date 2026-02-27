@@ -91,6 +91,16 @@ func Fetch(ctx context.Context, source string, windowStart, windowEnd time.Time)
 	return events, nil
 }
 
+// GroupByDay groups events by date string (YYYY-MM-DD in local time).
+func GroupByDay(events []Event) map[string][]Event {
+	grouped := make(map[string][]Event)
+	for _, e := range events {
+		key := e.StartTime.Local().Format("2006-01-02")
+		grouped[key] = append(grouped[key], e)
+	}
+	return grouped
+}
+
 // FormatPrefill joins event summaries with "; " for use as TUI textarea prefill text.
 func FormatPrefill(events []Event) string {
 	if len(events) == 0 {

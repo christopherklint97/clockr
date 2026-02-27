@@ -66,3 +66,79 @@ Return valid JSON matching the required schema.`, string(projectsJSON), totalMin
 func buildUserPrompt(description string) string {
 	return fmt.Sprintf("What I worked on: %s", description)
 }
+
+const batchJSONSchema = `{
+  "type": "object",
+  "properties": {
+    "allocations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "date": {"type": "string"},
+          "start_time": {"type": "string"},
+          "end_time": {"type": "string"},
+          "project_id": {"type": "string"},
+          "project_name": {"type": "string"},
+          "minutes": {"type": "integer"},
+          "description": {"type": "string"},
+          "confidence": {"type": "number"}
+        },
+        "required": ["date", "start_time", "end_time", "project_id", "project_name", "minutes", "description", "confidence"]
+      }
+    },
+    "clarification": {"type": "string"}
+  },
+  "required": ["allocations"]
+}`
+
+func buildBatchSystemPrompt(projects []clockify.Project, days []DaySlot) string {
+	type projectInfo struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+
+	var pList []projectInfo
+	for _, p := range projects {
+		pList = append(pList, projectInfo{ID: p.ID, Name: p.Name})
+	}
+	projectsJSON, _ := json.Marshal(pList)
+
+	var schedule string
+	for _, d := range days {
+		eventsStr := "none"
+		if len(d.Events) > 0 {
+			eventsStr = fmt.Sprintf("%s", d.Events)
+		}
+		schedule += fmt.Sprintf("  %s %s: %s–%s (%d min), calendar: %s\n",
+			d.Date, d.Weekday,
+			d.Start.Format("15:04"), d.End.Format("15:04"),
+			d.Minutes, eventsStr)
+	}
+
+	return fmt.Sprintf(`You are a time-tracking assistant. Your job is to match work descriptions to Clockify projects and create time entry allocations across multiple days.
+
+Available projects:
+%s
+
+Work schedule:
+%s
+Rules:
+- Create allocations for EACH work day listed above
+- Each day's allocations must sum to exactly that day's total minutes
+- Each allocation must be at least 30 minutes
+- Allocations must be contiguous within work hours (no gaps or overlaps within a day)
+- Use exact project IDs and names from the list above
+- The "date" field must be "YYYY-MM-DD" format
+- The "start_time" and "end_time" fields must be "HH:MM" format (24h)
+- Write professional, concise descriptions suitable for Clockify time entries
+- Use calendar events as context clues for what was worked on
+- If the description is unclear, set clarification to ask for more detail and return empty allocations
+- Set confidence between 0 and 1 based on how well the description matches a project
+
+Return valid JSON matching the required schema.`, string(projectsJSON), schedule)
+}
+
+func buildBatchUserPrompt(description string) string {
+	return fmt.Sprintf("What I worked on: %s", description)
+}
