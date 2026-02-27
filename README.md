@@ -94,7 +94,11 @@ clockr log --same
 
 ```sh
 clockr log --from 2026-02-23 --to 2026-02-27
+clockr log --from monday --to friday
+clockr log --from "last tuesday" --to today
 ```
+
+Dates accept `YYYY-MM-DD` or natural language (`monday`, `last friday`, `today`, etc.). Bare weekday names resolve to the most recent past occurrence.
 
 Opens a batch TUI for logging multiple days at once. The AI sees all work days in the range (skipping weekends/non-work-days), your calendar events per day, and your description, then produces allocations grouped by day for review. Useful when you've missed logging for several days. Limited to 10 work days per batch.
 
@@ -140,7 +144,7 @@ clockr status
 | `clockr stop` | Stop the running scheduler |
 | `clockr log` | Log a time entry interactively |
 | `clockr log --same` | Repeat last entry for current interval |
-| `clockr log --from DATE --to DATE` | Batch log a date range |
+| `clockr log --from DATE --to DATE` | Batch log a date range (supports natural language dates) |
 | `clockr status` | Show today's logged entries |
 | `clockr projects` | List Clockify projects |
 | `clockr config` | Open config in $EDITOR |

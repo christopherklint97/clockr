@@ -55,6 +55,7 @@ internal/
 - The batch TUI (`BatchApp`) has its own parallel state machine with the same flow but day-grouped views
 - Clockify credentials can be set via environment variables (`CLOCKIFY_API_KEY`, `CLOCKIFY_WORKSPACE_ID`) for `.env`/direnv support
 - Calendar integration fetches `.ics` events to pre-fill work descriptions; batch mode groups events by day
+- `--from`/`--to` flags accept `YYYY-MM-DD` or natural language dates (e.g., `monday`, `last friday`, `today`) via `tj/go-naturaldate`; bare weekday names default to past direction
 
 ## Testing
 
@@ -74,3 +75,4 @@ No test files yet.
 - `github.com/charmbracelet/bubbles` — TUI components (textarea, spinner, textinput)
 - `github.com/gen2brain/beeep` — Desktop notifications
 - `github.com/emersion/go-ical` — iCalendar parsing for calendar integration
+- `github.com/tj/go-naturaldate` — Natural language date parsing for `--from`/`--to` flags
