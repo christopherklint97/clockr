@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tj/go-naturaldate"
 	"github.com/christopherklint97/clockr/internal/ai"
 	"github.com/christopherklint97/clockr/internal/calendar"
 	"github.com/christopherklint97/clockr/internal/clockify"
@@ -76,8 +77,8 @@ var calendarTestCmd = &cobra.Command{
 
 func init() {
 	logCmd.Flags().Bool("same", false, "Log the same project/description as the last entry")
-	logCmd.Flags().String("from", "", "Start date for batch logging (YYYY-MM-DD)")
-	logCmd.Flags().String("to", "", "End date for batch logging (YYYY-MM-DD)")
+	logCmd.Flags().String("from", "", "Start date (YYYY-MM-DD, or natural: monday, last friday, etc.)")
+	logCmd.Flags().String("to", "", "End date (YYYY-MM-DD, or natural: friday, today, etc.)")
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
@@ -259,13 +260,13 @@ func runLog(cmd *cobra.Command, args []string) error {
 }
 
 func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string) error {
-	from, err := time.ParseInLocation("2006-01-02", fromStr, time.Now().Location())
+	from, err := parseDate(fromStr)
 	if err != nil {
-		return fmt.Errorf("invalid --from date %q (expected YYYY-MM-DD): %w", fromStr, err)
+		return fmt.Errorf("invalid --from date: %w", err)
 	}
-	to, err := time.ParseInLocation("2006-01-02", toStr, time.Now().Location())
+	to, err := parseDate(toStr)
 	if err != nil {
-		return fmt.Errorf("invalid --to date %q (expected YYYY-MM-DD): %w", toStr, err)
+		return fmt.Errorf("invalid --to date: %w", err)
 	}
 	if to.Before(from) {
 		return fmt.Errorf("--to date must be on or after --from date")
@@ -385,6 +386,18 @@ func parseTimeConfig(s string) (int, int, error) {
 		return 0, 0, fmt.Errorf("invalid minute in %q: %w", s, err)
 	}
 	return h, m, nil
+}
+
+func parseDate(s string) (time.Time, error) {
+	loc := time.Now().Location()
+	if t, err := time.ParseInLocation("2006-01-02", s, loc); err == nil {
+		return t, nil
+	}
+	t, err := naturaldate.Parse(s, time.Now(), naturaldate.WithDirection(naturaldate.Past))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("cannot parse date %q (use YYYY-MM-DD or natural language like 'monday', 'last friday')", s)
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc), nil
 }
 
 func runLogSame(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB) error {
