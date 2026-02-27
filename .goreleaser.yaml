@@ -26,6 +26,7 @@ brews:
   - repository:
       owner: christopherklint97
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/christopherklint97/clockr
     description: AI-powered time-tracking CLI for Clockify
     license: MIT
