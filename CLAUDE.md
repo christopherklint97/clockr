@@ -7,11 +7,9 @@ clockr is a Go CLI time-tracking assistant. It prompts the user for plain-Englis
 ## Build & run
 
 ```sh
-CGO_ENABLED=1 go build -o bin/clockr ./cmd/clockr   # or: make build
+go build -o bin/clockr ./cmd/clockr   # or: make build
 ./bin/clockr --help
 ```
-
-CGO is required for the SQLite driver (`github.com/mattn/go-sqlite3`).
 
 ## Project structure
 
@@ -55,7 +53,7 @@ internal/
 ## Testing
 
 ```sh
-CGO_ENABLED=1 go vet ./...
+go vet ./...
 ```
 
 No test files yet.
@@ -64,7 +62,7 @@ No test files yet.
 
 - `github.com/spf13/cobra` — CLI framework
 - `github.com/pelletier/go-toml/v2` — Config parsing
-- `github.com/mattn/go-sqlite3` — SQLite (requires CGO)
+- `modernc.org/sqlite` — SQLite (pure Go, no CGO required)
 - `github.com/charmbracelet/bubbletea` — TUI framework
 - `github.com/charmbracelet/lipgloss` — TUI styling
 - `github.com/charmbracelet/bubbles` — TUI components (textarea, spinner, textinput)

@@ -4,11 +4,25 @@ AI-powered time-tracking CLI that prompts you periodically, takes plain-English 
 
 ## Prerequisites
 
-- Go 1.24+ with CGO enabled (for SQLite)
+- Go 1.24+
 - [claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - A [Clockify](https://clockify.me) account and API key
 
 ## Install
+
+### Homebrew
+
+```sh
+brew install christopherklint97/tap/clockr
+```
+
+### Go
+
+```sh
+go install github.com/christopherklint97/clockr/cmd/clockr@latest
+```
+
+### From source
 
 ```sh
 make build        # builds to bin/clockr

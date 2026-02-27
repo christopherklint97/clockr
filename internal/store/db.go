@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 type DB struct {
@@ -25,7 +25,7 @@ func Open() (*DB, error) {
 	}
 
 	dbPath := filepath.Join(dir, "clockr.db")
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}

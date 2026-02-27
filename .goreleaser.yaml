@@ -1,0 +1,31 @@
+version: 2
+
+builds:
+  - main: ./cmd/clockr
+    binary: clockr
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+brews:
+  - repository:
+      owner: christopherklint97
+      name: homebrew-tap
+    homepage: https://github.com/christopherklint97/clockr
+    description: AI-powered time-tracking CLI for Clockify
+    license: MIT
