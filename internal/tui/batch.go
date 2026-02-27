@@ -31,8 +31,10 @@ type batchAIResponseMsg struct {
 }
 
 type batchSubmitMsg struct {
-	entries []store.Entry
-	err     error
+	entries    []store.Entry
+	failed     int
+	failedMsgs []string
+	err        error
 }
 
 // BatchApp is the Bubbletea model for batch/multi-day time entry.
@@ -44,6 +46,7 @@ type BatchApp struct {
 	edit        batchEditModel
 	result      *Result
 	errMsg      string
+	failedMsgs  []string
 
 	days        []ai.DaySlot
 	provider    ai.Provider
@@ -238,13 +241,15 @@ func (a *BatchApp) handleSubmit(msg batchSubmitMsg) (tea.Model, tea.Cmd) {
 	}
 
 	a.result = &Result{Entries: msg.entries}
+	a.failedMsgs = msg.failedMsgs
 	a.state = batchConfirmationView
 	return a, nil
 }
 
 func (a *BatchApp) queryAI(description string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		// Batch requests can be large (many days + projects); allow up to 5 minutes
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
 		suggestion, err := a.provider.MatchProjectsBatch(ctx, description, a.projects, a.days)
@@ -256,8 +261,10 @@ func (a *BatchApp) submitAllocations(allocations []ai.BatchAllocation) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		var entries []store.Entry
+		var failedMsgs []string
+		failed := 0
 
-		for _, alloc := range allocations {
+		for i, alloc := range allocations {
 			entryStart, err := parseBatchTime(alloc.Date, alloc.StartTime)
 			if err != nil {
 				return batchSubmitMsg{err: fmt.Errorf("parsing start time for %s: %w", alloc.Date, err)}
@@ -280,6 +287,9 @@ func (a *BatchApp) submitAllocations(allocations []ai.BatchAllocation) tea.Cmd {
 			clockifyID := ""
 			if err != nil {
 				status = "failed"
+				failed++
+				failedMsgs = append(failedMsgs, fmt.Sprintf("[%d/%d] %s %s–%s %s: %v",
+					i+1, len(allocations), alloc.Date, alloc.StartTime, alloc.EndTime, alloc.ProjectName, err))
 			} else {
 				clockifyID = created.ID
 			}
@@ -303,7 +313,7 @@ func (a *BatchApp) submitAllocations(allocations []ai.BatchAllocation) tea.Cmd {
 			entries = append(entries, storeEntry)
 		}
 
-		return batchSubmitMsg{entries: entries}
+		return batchSubmitMsg{entries: entries, failed: failed, failedMsgs: failedMsgs}
 	}
 }
 
@@ -314,19 +324,37 @@ func (a *BatchApp) confirmationView() string {
 
 	dayCount := make(map[string]int)
 	dayMinutes := make(map[string]int)
+	failedCount := 0
 	for _, e := range a.result.Entries {
 		date := e.StartTime.Local().Format("2006-01-02")
 		dayCount[date]++
 		dayMinutes[date] += e.Minutes
+		if e.Status == "failed" {
+			failedCount++
+		}
 	}
 
 	var sb strings.Builder
-	sb.WriteString(successStyle.Render(fmt.Sprintf("Logged %d entries across %d days!", len(a.result.Entries), len(dayCount))))
+	logged := len(a.result.Entries) - failedCount
+	if failedCount > 0 {
+		sb.WriteString(warningStyle.Render(fmt.Sprintf("Logged %d entries, %d failed across %d days", logged, failedCount, len(dayCount))))
+	} else {
+		sb.WriteString(successStyle.Render(fmt.Sprintf("Logged %d entries across %d days!", len(a.result.Entries), len(dayCount))))
+	}
 	sb.WriteString("\n\n")
 
 	for _, d := range a.days {
 		if count, ok := dayCount[d.Date]; ok {
 			sb.WriteString(fmt.Sprintf("  %s %s: %d entries, %d min\n", d.Date, d.Weekday, count, dayMinutes[d.Date]))
+		}
+	}
+
+	if len(a.failedMsgs) > 0 {
+		sb.WriteString("\n")
+		sb.WriteString(errorStyle.Render("Failed entries:"))
+		sb.WriteString("\n")
+		for _, msg := range a.failedMsgs {
+			sb.WriteString("  " + msg + "\n")
 		}
 	}
 

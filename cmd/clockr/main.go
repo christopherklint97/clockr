@@ -134,7 +134,7 @@ func loadConfig() (*config.Config, error) {
 
 func setupLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelError,
+		Level: slog.LevelInfo,
 	}))
 }
 
@@ -156,8 +156,8 @@ func resolveWorkspaceID(ctx context.Context, cfg *config.Config, client *clockif
 	return user.DefaultWorkspace, nil
 }
 
-func newAIProvider(cfg *config.Config) ai.Provider {
-	return ai.NewClaudeCLI(cfg.AI.Model)
+func newAIProvider(cfg *config.Config, logger *slog.Logger) ai.Provider {
+	return ai.NewClaudeCLI(cfg.AI.Model, logger)
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
@@ -182,7 +182,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	provider := newAIProvider(cfg)
+	provider := newAIProvider(cfg, logger)
 	sched := scheduler.New(cfg, client, db, provider, workspaceID)
 
 	// Handle graceful shutdown
@@ -257,7 +257,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	if fromStr != "" {
-		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub)
+		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub, logger)
 	}
 
 	projects, err := client.GetProjects(ctx, workspaceID)
@@ -265,7 +265,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("fetching projects: %w", err)
 	}
 
-	provider := newAIProvider(cfg)
+	provider := newAIProvider(cfg, logger)
 	now := time.Now()
 	interval := time.Duration(cfg.Schedule.IntervalMinutes) * time.Minute
 	startTime := now.Add(-interval)
@@ -313,7 +313,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool) error {
+func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool, logger *slog.Logger) error {
 	from, err := parseDate(fromStr)
 	if err != nil {
 		return fmt.Errorf("invalid --from date: %w", err)
@@ -383,7 +383,7 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 		}
 	}
 
-	provider := newAIProvider(cfg)
+	provider := newAIProvider(cfg, logger)
 	app := tui.NewBatchApp(days, provider, projects, client, workspaceID, db)
 	p := tea.NewProgram(app)
 
