@@ -46,8 +46,14 @@ type NotifyConfig struct {
 }
 
 type CalendarConfig struct {
-	Enabled bool   `toml:"enabled"`
-	Source  string `toml:"source"`
+	Enabled bool        `toml:"enabled"`
+	Source  string      `toml:"source"` // "graph" | ICS URL | file path
+	Graph   GraphConfig `toml:"graph"`
+}
+
+type GraphConfig struct {
+	ClientID string `toml:"client_id"`
+	TenantID string `toml:"tenant_id"`
 }
 
 func DefaultConfig() Config {
@@ -127,6 +133,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
 		cfg.GitHub.Token = v
+	}
+	if v := os.Getenv("MSGRAPH_CLIENT_ID"); v != "" {
+		cfg.Calendar.Graph.ClientID = v
+	}
+	if v := os.Getenv("MSGRAPH_TENANT_ID"); v != "" {
+		cfg.Calendar.Graph.TenantID = v
 	}
 }
 

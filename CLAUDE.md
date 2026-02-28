@@ -32,6 +32,10 @@ internal/
     models.go                 — Suggestion, Allocation, DaySlot, BatchAllocation, BatchSuggestion types
   calendar/
     calendar.go               — iCal fetch (URL or file), GroupByDay, FormatPrefill
+  msgraph/
+    token_store.go            — OAuth2 token persistence (JSON file, atomic write)
+    auth.go                   — Device code flow, token refresh, EnsureValidToken
+    client.go                 — Graph API calendarView client, returns []calendar.Event
   github/
     client.go                 — GitHub API client (retry on 429/5xx, Bearer auth), repo/commit/PR fetch, GroupByDay, FormatPrefill
   tui/
@@ -57,7 +61,8 @@ internal/
 - The TUI uses a view state machine: input → loading → suggestion → edit → confirmation
 - The batch TUI (`BatchApp`) has its own parallel state machine with the same flow but day-grouped views
 - Clockify credentials can be set via environment variables (`CLOCKIFY_API_KEY`, `CLOCKIFY_WORKSPACE_ID`) for `.env`/direnv support
-- Calendar integration fetches `.ics` events to pre-fill work descriptions; batch mode groups events by day
+- Calendar integration supports ICS (URL/file) or Microsoft Graph API (`source = "graph"`); batch mode groups events by day
+- Microsoft Graph integration uses OAuth2 device code flow; tokens cached in `~/.config/clockr/msgraph_tokens.json` with auto-refresh; requires Azure AD app with `Calendars.Read` delegated permission; config via `[calendar.graph]` or `MSGRAPH_CLIENT_ID`/`MSGRAPH_TENANT_ID` env vars
 - GitHub integration (`--github` flag) fetches commits/PRs from user-selected repos; token resolved via `gh auth token` → `GITHUB_TOKEN` env → config; repos saved to config after first picker selection
 - `--from`/`--to` flags accept `YYYY-MM-DD` or natural language dates (e.g., `monday`, `last friday`, `today`) via `tj/go-naturaldate`; bare weekday names default to past direction
 

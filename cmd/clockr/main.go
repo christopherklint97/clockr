@@ -18,6 +18,7 @@ import (
 	"github.com/christopherklint97/clockr/internal/clockify"
 	"github.com/christopherklint97/clockr/internal/config"
 	"github.com/christopherklint97/clockr/internal/github"
+	"github.com/christopherklint97/clockr/internal/msgraph"
 	"github.com/christopherklint97/clockr/internal/scheduler"
 	"github.com/christopherklint97/clockr/internal/store"
 	"github.com/christopherklint97/clockr/internal/tui"
@@ -77,6 +78,12 @@ var calendarTestCmd = &cobra.Command{
 	RunE:  runCalendarTest,
 }
 
+var calendarAuthCmd = &cobra.Command{
+	Use:   "auth",
+	Short: "Authenticate with Microsoft Graph API for calendar access",
+	RunE:  runCalendarAuth,
+}
+
 var githubCmd = &cobra.Command{
 	Use:   "github",
 	Short: "GitHub integration commands",
@@ -110,6 +117,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 
 	calendarCmd.AddCommand(calendarTestCmd)
+	calendarCmd.AddCommand(calendarAuthCmd)
 	rootCmd.AddCommand(calendarCmd)
 
 	githubReposCmd.AddCommand(githubReposResetCmd)
@@ -287,7 +295,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 		fmt.Println("Fetching calendar events...")
 		logger.Debug("fetching calendar events", "source", cfg.Calendar.Source, "start", startTime, "end", endTime)
 		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		events, err := calendar.Fetch(fetchCtx, cfg.Calendar.Source, startTime, endTime)
+		events, err := fetchCalendarEvents(fetchCtx, cfg, startTime, endTime, logger)
 		cancel()
 		if err != nil {
 			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
@@ -376,7 +384,7 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 		rangeEnd := days[len(days)-1].End
 		logger.Debug("fetching calendar events", "source", cfg.Calendar.Source, "start", rangeStart, "end", rangeEnd)
 		fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		events, err := calendar.Fetch(fetchCtx, cfg.Calendar.Source, rangeStart, rangeEnd)
+		events, err := fetchCalendarEvents(fetchCtx, cfg, rangeStart, rangeEnd, logger)
 		cancel()
 		if err != nil {
 			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
@@ -648,7 +656,8 @@ func runCalendarTest(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	events, err := calendar.Fetch(ctx, cfg.Calendar.Source, windowStart, windowEnd)
+	logger := setupLogger(cmd)
+	events, err := fetchCalendarEvents(ctx, cfg, windowStart, windowEnd, logger)
 	if err != nil {
 		return fmt.Errorf("fetching calendar: %w", err)
 	}
@@ -706,6 +715,10 @@ reminder_delay_seconds = %d
 [calendar]
 enabled = %t
 source = "%s"
+# For Microsoft Graph API calendar, set source = "graph" and configure below:
+# [calendar.graph]
+# client_id = ""  # Azure AD Application (client) ID
+# tenant_id = ""  # Azure AD Directory (tenant) ID
 
 [github]
 # token = ""  # optional: uses 'gh auth token' or GITHUB_TOKEN env var by default
@@ -746,6 +759,68 @@ source = "%s"
 	}
 	_, err = process.Wait()
 	return err
+}
+
+func fetchCalendarEvents(ctx context.Context, cfg *config.Config, start, end time.Time, logger *slog.Logger) ([]calendar.Event, error) {
+	if cfg.Calendar.Source == "graph" {
+		clientID := cfg.Calendar.Graph.ClientID
+		tenantID := cfg.Calendar.Graph.TenantID
+		if clientID == "" {
+			return nil, fmt.Errorf("calendar.graph.client_id not configured — see 'clockr calendar auth' setup instructions")
+		}
+		if tenantID == "" {
+			return nil, fmt.Errorf("calendar.graph.tenant_id not configured — set it in config or MSGRAPH_TENANT_ID env var")
+		}
+
+		auth := msgraph.NewAuth(clientID, tenantID, logger)
+		graphClient := msgraph.NewClient(auth, logger)
+		return graphClient.FetchEvents(ctx, start, end)
+	}
+
+	return calendar.Fetch(ctx, cfg.Calendar.Source, start, end)
+}
+
+func runCalendarAuth(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	clientID := cfg.Calendar.Graph.ClientID
+	tenantID := cfg.Calendar.Graph.TenantID
+	if clientID == "" {
+		return fmt.Errorf("calendar.graph.client_id not configured — add [calendar.graph] section with client_id to your config")
+	}
+	if tenantID == "" {
+		return fmt.Errorf("calendar.graph.tenant_id not configured — add tenant_id to [calendar.graph] config section")
+	}
+
+	logger := setupLogger(cmd)
+	auth := msgraph.NewAuth(clientID, tenantID, logger)
+
+	ctx := context.Background()
+	dcResp, err := auth.StartDeviceCodeFlow(ctx)
+	if err != nil {
+		return fmt.Errorf("starting device code flow: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println(dcResp.Message)
+	fmt.Println()
+
+	fmt.Println("Waiting for authorization...")
+	tokens, err := auth.PollForToken(ctx, dcResp.DeviceCode, dcResp.Interval)
+	if err != nil {
+		return fmt.Errorf("authorization failed: %w", err)
+	}
+
+	if err := msgraph.SaveTokens(tokens); err != nil {
+		return fmt.Errorf("saving tokens: %w", err)
+	}
+
+	fmt.Println("Authentication successful! Tokens saved.")
+	fmt.Println("You can now use source = \"graph\" in your [calendar] config.")
+	return nil
 }
 
 func fetchGitHubContext(ctx context.Context, cfg *config.Config, start, end time.Time, logger *slog.Logger) ([]github.CommitContext, error) {

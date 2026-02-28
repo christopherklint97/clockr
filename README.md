@@ -122,12 +122,42 @@ clockr github repos reset   # clear saved repos (re-prompts picker)
 
 ### Calendar integration
 
+#### ICS (Google Calendar, etc.)
+
 Configure an `.ics` calendar source to pre-fill the work description with your meeting/event summaries:
 
 ```toml
 [calendar]
 enabled = true
 source = "https://calendar.google.com/calendar/ical/.../basic.ics"
+```
+
+#### Microsoft Graph API (Outlook/Microsoft 365)
+
+For Outlook calendars, use the Microsoft Graph API to fetch past and future events (ICS published URLs only include future events):
+
+1. Register an app in [Azure Portal](https://portal.azure.com) → App registrations
+2. Set "Supported account types" to single-tenant (your org)
+3. Under Authentication → "Allow public client flows" → Yes
+4. Under API permissions → Add `Calendars.Read` (delegated)
+5. Add the app IDs to your config:
+
+```toml
+[calendar]
+enabled = true
+source = "graph"
+
+[calendar.graph]
+client_id = "your-azure-app-client-id"
+tenant_id = "your-azure-tenant-id"
+```
+
+Or set via environment variables: `MSGRAPH_CLIENT_ID`, `MSGRAPH_TENANT_ID`.
+
+6. Authenticate:
+
+```sh
+clockr calendar auth   # opens browser for device code flow
 ```
 
 Test it with:
@@ -167,6 +197,7 @@ clockr status
 | `clockr status` | Show today's logged entries |
 | `clockr projects` | List Clockify projects |
 | `clockr config` | Open config in $EDITOR |
+| `clockr calendar auth` | Authenticate with Microsoft Graph API |
 | `clockr calendar test` | Test calendar integration |
 | `clockr github repos` | List saved GitHub repos |
 | `clockr github repos reset` | Clear saved repos |
@@ -182,5 +213,6 @@ clockr status
 ## Data
 
 - Config: `~/.config/clockr/config.toml`
+- Graph API tokens: `~/.config/clockr/msgraph_tokens.json`
 - Database: `~/.config/clockr/clockr.db`
 - PID file: `~/.config/clockr/clockr.pid`
