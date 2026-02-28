@@ -60,15 +60,19 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	req.Header.Set("X-Api-Key", c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
+	c.logger.Debug("clockify API request", "method", method, "path", path)
+
 	var resp *http.Response
 	maxRetries := 3
+	requestStart := time.Now()
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		resp, err = c.httpClient.Do(req)
 		if err != nil {
 			if attempt == maxRetries {
-				c.logger.Error("API request transport error", "method", method, "path", path, "error", err)
+				c.logger.Error("API request transport error", "method", method, "path", path, "error", err, "elapsed", time.Since(requestStart))
 				return nil, fmt.Errorf("sending request: %w", err)
 			}
+			c.logger.Debug("API request transport error, retrying", "method", method, "path", path, "attempt", attempt+1, "error", err)
 			time.Sleep(backoff(attempt))
 			continue
 		}
@@ -76,9 +80,10 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
 			resp.Body.Close()
 			if attempt == maxRetries {
-				c.logger.Error("API request failed after retries", "method", method, "path", path, "status", resp.StatusCode, "attempts", maxRetries+1)
+				c.logger.Error("API request failed after retries", "method", method, "path", path, "status", resp.StatusCode, "attempts", maxRetries+1, "elapsed", time.Since(requestStart))
 				return nil, fmt.Errorf("API returned status %d after %d retries", resp.StatusCode, maxRetries)
 			}
+			c.logger.Debug("API request retryable error", "method", method, "path", path, "status", resp.StatusCode, "attempt", attempt+1)
 			time.Sleep(backoff(attempt))
 			continue
 		}
@@ -90,6 +95,8 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	if err != nil {
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
+
+	c.logger.Debug("clockify API response", "method", method, "path", path, "status", resp.StatusCode, "bytes", len(respBody), "elapsed", time.Since(requestStart))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		c.logger.Error("API request failed", "method", method, "path", path, "status", resp.StatusCode, "response", truncate(string(respBody), 200))

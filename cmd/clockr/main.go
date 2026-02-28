@@ -95,6 +95,8 @@ var githubReposResetCmd = &cobra.Command{
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose debug logging")
+
 	logCmd.Flags().Bool("same", false, "Log the same project/description as the last entry")
 	logCmd.Flags().String("from", "", "Start date (YYYY-MM-DD, or natural: monday, last friday, etc.)")
 	logCmd.Flags().String("to", "", "End date (YYYY-MM-DD, or natural: friday, today, etc.)")
@@ -132,9 +134,14 @@ func loadConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
-func setupLogger() *slog.Logger {
+func setupLogger(cmd *cobra.Command) *slog.Logger {
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	level := slog.LevelError
+	if verbose {
+		level = slog.LevelDebug
+	}
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelError,
+		Level: level,
 	}))
 }
 
@@ -156,8 +163,8 @@ func resolveWorkspaceID(ctx context.Context, cfg *config.Config, client *clockif
 	return user.DefaultWorkspace, nil
 }
 
-func newAIProvider(cfg *config.Config) ai.Provider {
-	return ai.NewClaudeCLI(cfg.AI.Model)
+func newAIProvider(cfg *config.Config, logger *slog.Logger) ai.Provider {
+	return ai.NewClaudeCLI(cfg.AI.Model, logger)
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
@@ -172,7 +179,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	logger := setupLogger()
+	logger := setupLogger(cmd)
 	client := newClockifyClient(cfg, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -182,7 +189,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	provider := newAIProvider(cfg)
+	provider := newAIProvider(cfg, logger)
 	sched := scheduler.New(cfg, client, db, provider, workspaceID)
 
 	// Handle graceful shutdown
@@ -243,29 +250,33 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	logger := setupLogger()
+	logger := setupLogger(cmd)
 	client := newClockifyClient(cfg, logger)
 	ctx := context.Background()
 
+	logger.Debug("resolving workspace ID")
 	workspaceID, err := resolveWorkspaceID(ctx, cfg, client)
 	if err != nil {
 		return err
 	}
+	logger.Debug("workspace resolved", "workspace_id", workspaceID)
 
 	if same {
 		return runLogSame(ctx, cfg, client, workspaceID, db)
 	}
 
 	if fromStr != "" {
-		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub)
+		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub, logger)
 	}
 
+	logger.Debug("fetching projects")
 	projects, err := client.GetProjects(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("fetching projects: %w", err)
 	}
+	logger.Debug("projects loaded", "count", len(projects))
 
-	provider := newAIProvider(cfg)
+	provider := newAIProvider(cfg, logger)
 	now := time.Now()
 	interval := time.Duration(cfg.Schedule.IntervalMinutes) * time.Minute
 	startTime := now.Add(-interval)
@@ -274,12 +285,15 @@ func runLog(cmd *cobra.Command, args []string) error {
 	var contextItems []string
 	if cfg.Calendar.Enabled && cfg.Calendar.Source != "" {
 		fmt.Println("Fetching calendar events...")
+		logger.Debug("fetching calendar events", "source", cfg.Calendar.Source, "start", startTime, "end", endTime)
 		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		events, err := calendar.Fetch(fetchCtx, cfg.Calendar.Source, startTime, endTime)
 		cancel()
 		if err != nil {
 			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
+			logger.Debug("calendar fetch error", "error", err)
 		} else {
+			logger.Debug("calendar events fetched", "count", len(events))
 			for _, e := range events {
 				contextItems = append(contextItems, e.Summary)
 			}
@@ -288,10 +302,13 @@ func runLog(cmd *cobra.Command, args []string) error {
 
 	// Fetch GitHub context if requested (sent to AI via system prompt, not textarea)
 	if useGitHub {
-		ghItems, err := fetchGitHubContext(ctx, cfg, startTime, endTime)
+		logger.Debug("fetching GitHub context", "start", startTime, "end", endTime)
+		ghItems, err := fetchGitHubContext(ctx, cfg, startTime, endTime, logger)
 		if err != nil {
 			fmt.Printf("Warning: GitHub fetch failed: %v\n", err)
+			logger.Debug("GitHub fetch error", "error", err)
 		} else {
+			logger.Debug("GitHub items fetched", "count", len(ghItems))
 			for _, item := range ghItems {
 				contextItems = append(contextItems, item.Message)
 			}
@@ -313,7 +330,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool) error {
+func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool, logger *slog.Logger) error {
 	from, err := parseDate(fromStr)
 	if err != nil {
 		return fmt.Errorf("invalid --from date: %w", err)
@@ -322,6 +339,7 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 	if err != nil {
 		return fmt.Errorf("invalid --to date: %w", err)
 	}
+	logger.Debug("batch date range parsed", "from", from.Format("2006-01-02"), "to", to.Format("2006-01-02"))
 	if to.Before(from) {
 		return fmt.Errorf("--to date must be on or after --from date")
 	}
@@ -336,23 +354,35 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 	if len(days) > 10 {
 		return fmt.Errorf("batch limited to 10 work days, got %d (narrow the date range)", len(days))
 	}
+	logger.Debug("day slots built", "count", len(days), "dates", func() string {
+		var dates []string
+		for _, d := range days {
+			dates = append(dates, d.Date)
+		}
+		return strings.Join(dates, ", ")
+	}())
 
+	logger.Debug("fetching projects")
 	projects, err := client.GetProjects(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("fetching projects: %w", err)
 	}
+	logger.Debug("projects loaded", "count", len(projects))
 
 	// Fetch calendar events for the full range and attach to day slots (per-day AI context)
 	if cfg.Calendar.Enabled && cfg.Calendar.Source != "" {
 		fmt.Println("Fetching calendar events...")
 		rangeStart := days[0].Start
 		rangeEnd := days[len(days)-1].End
+		logger.Debug("fetching calendar events", "source", cfg.Calendar.Source, "start", rangeStart, "end", rangeEnd)
 		fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		events, err := calendar.Fetch(fetchCtx, cfg.Calendar.Source, rangeStart, rangeEnd)
 		cancel()
 		if err != nil {
 			fmt.Printf("Warning: calendar fetch failed: %v\n", err)
+			logger.Debug("calendar fetch error", "error", err)
 		} else {
+			logger.Debug("calendar events fetched", "count", len(events))
 			grouped := calendar.GroupByDay(events)
 			for i, d := range days {
 				if dayEvents, ok := grouped[d.Date]; ok {
@@ -368,10 +398,13 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 	if useGitHub {
 		rangeStart := days[0].Start
 		rangeEnd := days[len(days)-1].End
-		ghItems, err := fetchGitHubContext(ctx, cfg, rangeStart, rangeEnd)
+		logger.Debug("fetching GitHub context", "start", rangeStart, "end", rangeEnd)
+		ghItems, err := fetchGitHubContext(ctx, cfg, rangeStart, rangeEnd, logger)
 		if err != nil {
 			fmt.Printf("Warning: GitHub fetch failed: %v\n", err)
+			logger.Debug("GitHub fetch error", "error", err)
 		} else if len(ghItems) > 0 {
+			logger.Debug("GitHub items fetched", "count", len(ghItems))
 			grouped := github.GroupByDay(ghItems)
 			for i, d := range days {
 				if dayItems, ok := grouped[d.Date]; ok {
@@ -383,7 +416,7 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 		}
 	}
 
-	provider := newAIProvider(cfg)
+	provider := newAIProvider(cfg, logger)
 	app := tui.NewBatchApp(days, provider, projects, client, workspaceID, db)
 	p := tea.NewProgram(app)
 
@@ -571,7 +604,7 @@ func runProjects(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	logger := setupLogger()
+	logger := setupLogger(cmd)
 	client := newClockifyClient(cfg, logger)
 	ctx := context.Background()
 
@@ -715,13 +748,14 @@ source = "%s"
 	return err
 }
 
-func fetchGitHubContext(ctx context.Context, cfg *config.Config, start, end time.Time) ([]github.CommitContext, error) {
+func fetchGitHubContext(ctx context.Context, cfg *config.Config, start, end time.Time, logger *slog.Logger) ([]github.CommitContext, error) {
+	logger.Debug("resolving GitHub token")
 	token, err := github.ResolveToken(cfg.GitHub.Token)
 	if err != nil {
 		return nil, err
 	}
+	logger.Debug("GitHub token resolved")
 
-	logger := setupLogger()
 	ghClient := github.NewClient(token, logger)
 
 	repos := cfg.GitHub.Repos

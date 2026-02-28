@@ -244,7 +244,7 @@ func (a *BatchApp) handleSubmit(msg batchSubmitMsg) (tea.Model, tea.Cmd) {
 
 func (a *BatchApp) queryAI(description string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
 		suggestion, err := a.provider.MatchProjectsBatch(ctx, description, a.projects, a.days)

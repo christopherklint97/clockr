@@ -361,11 +361,13 @@ func Fetch(ctx context.Context, client *Client, repos []string, start, end time.
 	var items []CommitContext
 
 	for _, repo := range repos {
+		client.logger.Debug("fetching commits", "repo", repo, "since", start.Format(time.RFC3339), "until", end.Format(time.RFC3339))
 		commits, err := client.GetCommits(ctx, repo, start, end)
 		if err != nil {
 			client.logger.Warn("failed to fetch commits", "repo", repo, "error", err)
 			continue
 		}
+		client.logger.Debug("commits fetched", "repo", repo, "count", len(commits))
 		for _, c := range commits {
 			items = append(items, CommitContext{
 				Repo:    c.Repo,
@@ -374,11 +376,13 @@ func Fetch(ctx context.Context, client *Client, repos []string, start, end time.
 			})
 		}
 
+		client.logger.Debug("fetching merged PRs", "repo", repo)
 		prs, err := client.GetMergedPRs(ctx, repo, start, end)
 		if err != nil {
 			client.logger.Warn("failed to fetch PRs", "repo", repo, "error", err)
 			continue
 		}
+		client.logger.Debug("PRs fetched", "repo", repo, "count", len(prs))
 		for _, pr := range prs {
 			items = append(items, CommitContext{
 				Repo:    pr.Repo,
