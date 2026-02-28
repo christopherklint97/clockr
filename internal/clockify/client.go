@@ -167,6 +167,25 @@ func (c *Client) GetProjects(ctx context.Context, workspaceID string) ([]Project
 	return allProjects, nil
 }
 
+func (c *Client) GetClients(ctx context.Context, workspaceID string) ([]ClockifyClient, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspace ID is empty — set workspace_id in config or CLOCKIFY_WORKSPACE_ID env var")
+	}
+
+	path := fmt.Sprintf("/workspaces/%s/clients?page-size=500&archived=false", workspaceID)
+	data, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("getting clients: %w", err)
+	}
+
+	var clients []ClockifyClient
+	if err := json.Unmarshal(data, &clients); err != nil {
+		return nil, fmt.Errorf("parsing clients response: %w", err)
+	}
+
+	return clients, nil
+}
+
 func (c *Client) CreateTimeEntry(ctx context.Context, workspaceID string, entry TimeEntryRequest) (*TimeEntry, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspace ID is empty — set workspace_id in config or CLOCKIFY_WORKSPACE_ID env var")

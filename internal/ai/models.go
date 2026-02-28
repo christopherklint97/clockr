@@ -10,6 +10,7 @@ type Suggestion struct {
 type Allocation struct {
 	ProjectID   string  `json:"project_id"`
 	ProjectName string  `json:"project_name"`
+	ClientName  string  `json:"client_name,omitempty"`
 	Minutes     int     `json:"minutes"`
 	Description string  `json:"description"`
 	Confidence  float64 `json:"confidence"`
@@ -33,6 +34,7 @@ type BatchAllocation struct {
 	EndTime     string  `json:"end_time"`    // "HH:MM"
 	ProjectID   string  `json:"project_id"`
 	ProjectName string  `json:"project_name"`
+	ClientName  string  `json:"client_name,omitempty"`
 	Minutes     int     `json:"minutes"`
 	Description string  `json:"description"`
 	Confidence  float64 `json:"confidence"`

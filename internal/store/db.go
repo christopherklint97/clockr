@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -63,10 +64,15 @@ func (db *DB) migrate() error {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		)`,
+		`ALTER TABLE entries ADD COLUMN client_name TEXT NOT NULL DEFAULT ''`,
 	}
 
 	for _, m := range migrations {
 		if _, err := db.Exec(m); err != nil {
+			// Ignore "duplicate column" errors from ALTER TABLE migrations
+			if strings.Contains(err.Error(), "duplicate column") {
+				continue
+			}
 			return fmt.Errorf("executing migration: %w", err)
 		}
 	}

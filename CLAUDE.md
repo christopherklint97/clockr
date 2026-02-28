@@ -66,6 +66,10 @@ internal/
 - GitHub integration (`--github` flag) fetches commits/PRs from user-selected repos; token resolved via `gh auth token` → `GITHUB_TOKEN` env → config; repos saved to config after first picker selection
 - `--from`/`--to` flags accept `YYYY-MM-DD` or natural language dates (e.g., `monday`, `last friday`, `today`) via `tj/go-naturaldate`; bare weekday names default to past direction
 
+## Important rules
+
+- Do NOT attempt to run `claude` CLI commands (e.g., `claude -p ...`). The nested session check will block them. Only modify the code that invokes the CLI — never run it directly.
+
 ## Testing
 
 ```sh

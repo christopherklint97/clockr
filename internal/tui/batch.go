@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/christopherklint97/clockr/internal/ai"
 	"github.com/christopherklint97/clockr/internal/clockify"
@@ -51,6 +52,13 @@ type BatchApp struct {
 	clockify    *clockify.Client
 	workspaceID string
 	db          *store.DB
+
+	thinkCh          <-chan string
+	thinkingText     string
+	viewport         viewport.Model
+	loadingStartTime time.Time
+	termWidth        int
+	termHeight       int
 }
 
 func NewBatchApp(
@@ -60,6 +68,7 @@ func NewBatchApp(
 	client *clockify.Client,
 	workspaceID string,
 	db *store.DB,
+	lastInput string,
 ) *BatchApp {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -72,9 +81,12 @@ func NewBatchApp(
 	timeInfo := fmt.Sprintf("Batch: %s to %s (%d days, %d min total)",
 		days[0].Date, days[totalDays-1].Date, totalDays, totalMin)
 
+	input := newInputModel(timeInfo)
+	input.lastInput = lastInput
+
 	return &BatchApp{
 		state:       batchInputView,
-		input:       newInputModel(timeInfo),
+		input:       input,
 		spinner:     s,
 		days:        days,
 		provider:    provider,
@@ -85,14 +97,24 @@ func NewBatchApp(
 	}
 }
 
+func (a *BatchApp) SetInitialInput(text string) {
+	a.input.textarea.SetValue(text)
+}
+
 func (a *BatchApp) Init() tea.Cmd {
 	return tea.Batch(a.input.textarea.Focus(), a.spinner.Tick)
 }
 
 func (a *BatchApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		a.termWidth = wsMsg.Width
+		a.termHeight = wsMsg.Height
 		var cmd tea.Cmd
 		a.input, cmd = a.input.Update(wsMsg)
+		if a.state == batchLoadingView {
+			a.viewport.Width = a.termWidth
+			a.viewport.Height = max(a.termHeight-3, 1)
+		}
 		return a, cmd
 	}
 
@@ -106,6 +128,18 @@ func (a *BatchApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleAIResponse(msg)
 	case batchSubmitMsg:
 		return a.handleSubmit(msg)
+	case thinkingMsg:
+		a.thinkingText += msg.text
+		a.viewport.SetContent(a.thinkingText)
+		a.viewport.GotoBottom()
+		return a, readThinking(a.thinkCh)
+	case thinkingDoneMsg:
+		return a, nil
+	case tickMsg:
+		if a.state == batchLoadingView {
+			return a, tickCmd()
+		}
+		return a, nil
 	}
 
 	switch a.state {
@@ -129,7 +163,10 @@ func (a *BatchApp) View() string {
 	case batchInputView:
 		return a.input.View()
 	case batchLoadingView:
-		return a.spinner.View() + " Thinking (batch mode, this may take a moment)..."
+		elapsed := time.Since(a.loadingStartTime).Truncate(time.Second)
+		header := fmt.Sprintf("%s Thinking...  %s", a.spinner.View(), dimStyle.Render(formatElapsed(elapsed)))
+		separator := dimStyle.Render(strings.Repeat("─", a.termWidth))
+		return header + "\n" + separator + "\n" + a.viewport.View()
 	case batchSuggestionView:
 		return a.suggestions.View()
 	case batchEditView:
@@ -151,7 +188,17 @@ func (a *BatchApp) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if keyMsg.String() == "enter" && a.input.Value() != "" {
 			a.state = batchLoadingView
-			return a, tea.Batch(a.spinner.Tick, a.queryAI(a.input.Value()))
+			a.thinkingText = ""
+			a.loadingStartTime = time.Now()
+			a.viewport = viewport.New(a.termWidth, max(a.termHeight-3, 1))
+			ch := make(chan string, 100)
+			a.thinkCh = ch
+			return a, tea.Batch(
+				a.spinner.Tick,
+				a.startAI(a.input.Value(), ch),
+				readThinking(ch),
+				tickCmd(),
+			)
 		}
 	}
 
@@ -161,9 +208,13 @@ func (a *BatchApp) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *BatchApp) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	a.spinner, cmd = a.spinner.Update(msg)
-	return a, cmd
+	cmds = append(cmds, cmd)
+	a.viewport, cmd = a.viewport.Update(msg)
+	cmds = append(cmds, cmd)
+	return a, tea.Batch(cmds...)
 }
 
 func (a *BatchApp) updateSuggestion(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -242,10 +293,25 @@ func (a *BatchApp) handleSubmit(msg batchSubmitMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a *BatchApp) queryAI(description string) tea.Cmd {
+// startAI runs the AI provider in a goroutine, streaming thinking text to ch.
+func (a *BatchApp) startAI(description string, ch chan<- string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		resetIdle := idleTimeout(cancel, 2*time.Minute)
+
+		if cli, ok := a.provider.(*ai.ClaudeCLI); ok {
+			cli.OnThinking = func(text string) {
+				resetIdle()
+				select {
+				case ch <- text:
+				default:
+				}
+			}
+			defer func() { cli.OnThinking = nil }()
+		}
+		defer close(ch)
 
 		suggestion, err := a.provider.MatchProjectsBatch(ctx, description, a.projects, a.days)
 		return batchAIResponseMsg{suggestion: suggestion, err: err}
@@ -288,6 +354,7 @@ func (a *BatchApp) submitAllocations(allocations []ai.BatchAllocation) tea.Cmd {
 				ClockifyID:  clockifyID,
 				ProjectID:   alloc.ProjectID,
 				ProjectName: alloc.ProjectName,
+				ClientName:  alloc.ClientName,
 				Description: alloc.Description,
 				StartTime:   entryStart,
 				EndTime:     entryEnd,
@@ -400,10 +467,15 @@ func (m batchSuggestionsModel) View() string {
 				prefix = "> "
 			}
 
+			projectDisplay := a.ProjectName
+			if a.ClientName != "" {
+				projectDisplay = a.ClientName + " / " + a.ProjectName
+			}
+
 			confidence := fmt.Sprintf("%.0f%%", a.Confidence*100)
-			line := fmt.Sprintf("%s%-20s  %3dmin  %s  %s–%s  %s",
+			line := fmt.Sprintf("%s%-30s  %3dmin  %s  %s–%s  %s",
 				prefix,
-				a.ProjectName,
+				projectDisplay,
 				a.Minutes,
 				dimStyle.Render(confidence),
 				a.StartTime,
@@ -546,6 +618,7 @@ func (m *batchEditModel) applyEdit() {
 		if len(m.filtered) > 0 {
 			m.allocations[m.cursor].ProjectID = m.filtered[0].ID
 			m.allocations[m.cursor].ProjectName = m.filtered[0].Name
+			m.allocations[m.cursor].ClientName = m.filtered[0].ClientName
 		}
 	case batchEditMinutes:
 		if v, err := strconv.Atoi(m.textInput.Value()); err == nil && v > 0 {
@@ -580,8 +653,12 @@ func (m batchEditModel) View() string {
 			prefix = "> "
 		}
 
-		line := fmt.Sprintf("%s%s %-20s  %3dmin  %s–%s  %s",
-			prefix, a.Date, a.ProjectName, a.Minutes, a.StartTime, a.EndTime, a.Description)
+		projectDisplay := a.ProjectName
+		if a.ClientName != "" {
+			projectDisplay = a.ClientName + " / " + a.ProjectName
+		}
+		line := fmt.Sprintf("%s%s %-30s  %3dmin  %s–%s  %s",
+			prefix, a.Date, projectDisplay, a.Minutes, a.StartTime, a.EndTime, a.Description)
 		if i == m.cursor {
 			line = highlightStyle.Render(line)
 		}
@@ -602,7 +679,11 @@ func (m batchEditModel) View() string {
 				limit = len(m.filtered)
 			}
 			for _, p := range m.filtered[:limit] {
-				sb.WriteString(fmt.Sprintf("  %s\n", dimStyle.Render(p.Name)))
+				display := p.Name
+				if p.ClientName != "" {
+					display = p.ClientName + " / " + p.Name
+				}
+				sb.WriteString(fmt.Sprintf("  %s\n", dimStyle.Render(display)))
 			}
 		}
 	}

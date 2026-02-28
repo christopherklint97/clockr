@@ -97,7 +97,8 @@ func (s *Scheduler) prompt(ctx context.Context, tickTime time.Time, interval tim
 		}
 	}
 
-	app := tui.NewApp(startTime, endTime, s.provider, projects, s.client, s.workspaceID, s.db, interval, contextItems)
+	lastInput, _ := s.db.GetLastRawInput()
+	app := tui.NewApp(startTime, endTime, s.provider, projects, s.client, s.workspaceID, s.db, interval, contextItems, lastInput)
 	p := tea.NewProgram(app)
 
 	if _, err := p.Run(); err != nil {

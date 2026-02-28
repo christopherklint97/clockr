@@ -11,11 +11,17 @@ type User struct {
 }
 
 type Project struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Archived bool   `json:"archived"`
-	Color    string `json:"color"`
-	ClientID string `json:"clientId"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Archived   bool   `json:"archived"`
+	Color      string `json:"color"`
+	ClientID   string `json:"clientId"`
+	ClientName string `json:"-"` // populated after fetching clients
+}
+
+type ClockifyClient struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type TimeEntryRequest struct {

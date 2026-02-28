@@ -19,6 +19,7 @@ const jsonSchema = `{
         "properties": {
           "project_id": {"type": "string"},
           "project_name": {"type": "string"},
+          "client_name": {"type": "string"},
           "minutes": {"type": "integer"},
           "description": {"type": "string"},
           "confidence": {"type": "number"}
@@ -33,13 +34,14 @@ const jsonSchema = `{
 
 func buildSystemPrompt(projects []clockify.Project, interval time.Duration, contextItems []string) string {
 	type projectInfo struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		ClientName string `json:"client_name,omitempty"`
 	}
 
 	var pList []projectInfo
 	for _, p := range projects {
-		pList = append(pList, projectInfo{ID: p.ID, Name: p.Name})
+		pList = append(pList, projectInfo{ID: p.ID, Name: p.Name, ClientName: p.ClientName})
 	}
 
 	projectsJSON, _ := json.Marshal(pList)
@@ -96,6 +98,7 @@ const batchJSONSchema = `{
           "end_time": {"type": "string"},
           "project_id": {"type": "string"},
           "project_name": {"type": "string"},
+          "client_name": {"type": "string"},
           "minutes": {"type": "integer"},
           "description": {"type": "string"},
           "confidence": {"type": "number"}
@@ -110,13 +113,14 @@ const batchJSONSchema = `{
 
 func buildBatchSystemPrompt(projects []clockify.Project, days []DaySlot) string {
 	type projectInfo struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		ClientName string `json:"client_name,omitempty"`
 	}
 
 	var pList []projectInfo
 	for _, p := range projects {
-		pList = append(pList, projectInfo{ID: p.ID, Name: p.Name})
+		pList = append(pList, projectInfo{ID: p.ID, Name: p.Name, ClientName: p.ClientName})
 	}
 	projectsJSON, _ := json.Marshal(pList)
 

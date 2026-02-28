@@ -11,6 +11,7 @@ type Entry struct {
 	ClockifyID  string
 	ProjectID   string
 	ProjectName string
+	ClientName  string
 	Description string
 	StartTime   time.Time
 	EndTime     time.Time
@@ -22,9 +23,9 @@ type Entry struct {
 
 func (db *DB) InsertEntry(e *Entry) (int64, error) {
 	result, err := db.Exec(
-		`INSERT INTO entries (clockify_id, project_id, project_name, description, start_time, end_time, minutes, status, raw_input)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ClockifyID, e.ProjectID, e.ProjectName, e.Description,
+		`INSERT INTO entries (clockify_id, project_id, project_name, client_name, description, start_time, end_time, minutes, status, raw_input)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ClockifyID, e.ProjectID, e.ProjectName, e.ClientName, e.Description,
 		e.StartTime.UTC().Format(time.RFC3339),
 		e.EndTime.UTC().Format(time.RFC3339),
 		e.Minutes, e.Status, e.RawInput,
@@ -49,7 +50,7 @@ func (db *DB) GetTodayEntries() ([]Entry, error) {
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
 	return db.queryEntries(
-		`SELECT id, clockify_id, project_id, project_name, description, start_time, end_time, minutes, status, raw_input, created_at
+		`SELECT id, clockify_id, project_id, project_name, client_name, description, start_time, end_time, minutes, status, raw_input, created_at
 		 FROM entries
 		 WHERE start_time >= ? AND start_time < ?
 		 ORDER BY start_time ASC`,
@@ -60,7 +61,7 @@ func (db *DB) GetTodayEntries() ([]Entry, error) {
 
 func (db *DB) GetLastEntry() (*Entry, error) {
 	entries, err := db.queryEntries(
-		`SELECT id, clockify_id, project_id, project_name, description, start_time, end_time, minutes, status, raw_input, created_at
+		`SELECT id, clockify_id, project_id, project_name, client_name, description, start_time, end_time, minutes, status, raw_input, created_at
 		 FROM entries
 		 WHERE status = 'logged'
 		 ORDER BY created_at DESC
@@ -75,9 +76,26 @@ func (db *DB) GetLastEntry() (*Entry, error) {
 	return &entries[0], nil
 }
 
+func (db *DB) GetLastRawInput() (string, error) {
+	var rawInput sql.NullString
+	err := db.QueryRow(
+		`SELECT raw_input FROM entries
+		 WHERE status = 'logged' AND raw_input IS NOT NULL AND raw_input != '' AND raw_input != '(--same)'
+		 ORDER BY created_at DESC
+		 LIMIT 1`,
+	).Scan(&rawInput)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return rawInput.String, nil
+}
+
 func (db *DB) GetFailedEntries() ([]Entry, error) {
 	return db.queryEntries(
-		`SELECT id, clockify_id, project_id, project_name, description, start_time, end_time, minutes, status, raw_input, created_at
+		`SELECT id, clockify_id, project_id, project_name, client_name, description, start_time, end_time, minutes, status, raw_input, created_at
 		 FROM entries
 		 WHERE status = 'failed'
 		 ORDER BY created_at ASC`,
@@ -94,17 +112,18 @@ func (db *DB) queryEntries(query string, args ...interface{}) ([]Entry, error) {
 	var entries []Entry
 	for rows.Next() {
 		var e Entry
-		var clockifyID, rawInput sql.NullString
+		var clockifyID, clientName, rawInput sql.NullString
 		var startStr, endStr, createdStr string
 
 		if err := rows.Scan(
-			&e.ID, &clockifyID, &e.ProjectID, &e.ProjectName, &e.Description,
+			&e.ID, &clockifyID, &e.ProjectID, &e.ProjectName, &clientName, &e.Description,
 			&startStr, &endStr, &e.Minutes, &e.Status, &rawInput, &createdStr,
 		); err != nil {
 			return nil, fmt.Errorf("scanning entry: %w", err)
 		}
 
 		e.ClockifyID = clockifyID.String
+		e.ClientName = clientName.String
 		e.RawInput = rawInput.String
 
 		if t, err := time.Parse(time.RFC3339, startStr); err == nil {

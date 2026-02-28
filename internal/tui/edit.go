@@ -119,6 +119,7 @@ func (m *editModel) applyEdit() {
 		if len(m.filtered) > 0 {
 			m.allocations[m.cursor].ProjectID = m.filtered[0].ID
 			m.allocations[m.cursor].ProjectName = m.filtered[0].Name
+			m.allocations[m.cursor].ClientName = m.filtered[0].ClientName
 		}
 	case editMinutes:
 		if v, err := strconv.Atoi(m.textInput.Value()); err == nil && v > 0 {
@@ -145,7 +146,11 @@ func (m editModel) View() string {
 			prefix = "> "
 		}
 
-		line := fmt.Sprintf("%s%-20s  %3dmin  %s", prefix, a.ProjectName, a.Minutes, a.Description)
+		projectDisplay := a.ProjectName
+		if a.ClientName != "" {
+			projectDisplay = a.ClientName + " / " + a.ProjectName
+		}
+		line := fmt.Sprintf("%s%-30s  %3dmin  %s", prefix, projectDisplay, a.Minutes, a.Description)
 		if i == m.cursor {
 			line = highlightStyle.Render(line)
 		}
@@ -166,7 +171,11 @@ func (m editModel) View() string {
 				limit = len(m.filtered)
 			}
 			for _, p := range m.filtered[:limit] {
-				sb.WriteString(fmt.Sprintf("  %s\n", dimStyle.Render(p.Name)))
+				display := p.Name
+				if p.ClientName != "" {
+					display = p.ClientName + " / " + p.Name
+				}
+				sb.WriteString(fmt.Sprintf("  %s\n", dimStyle.Render(display)))
 			}
 		}
 	}

@@ -3,9 +3,12 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/christopherklint97/clockr/internal/ai"
 	"github.com/christopherklint97/clockr/internal/clockify"
@@ -37,6 +40,17 @@ type submitMsg struct {
 	err     error
 }
 
+// thinkingMsg carries a streaming text chunk from the AI provider.
+type thinkingMsg struct {
+	text string
+}
+
+// thinkingDoneMsg signals that the thinking stream channel has closed.
+type thinkingDoneMsg struct{}
+
+// tickMsg fires every second during loading to update elapsed time.
+type tickMsg time.Time
+
 type App struct {
 	state       viewState
 	input       inputModel
@@ -46,15 +60,22 @@ type App struct {
 	result      *Result
 	errMsg      string
 
-	startTime   time.Time
-	endTime     time.Time
-	provider    ai.Provider
-	projects    []clockify.Project
-	clockify    *clockify.Client
-	workspaceID string
-	db          *store.DB
-	interval    time.Duration
+	startTime    time.Time
+	endTime      time.Time
+	provider     ai.Provider
+	projects     []clockify.Project
+	clockify     *clockify.Client
+	workspaceID  string
+	db           *store.DB
+	interval     time.Duration
 	contextItems []string
+
+	thinkCh          <-chan string
+	thinkingText     string
+	viewport         viewport.Model
+	loadingStartTime time.Time
+	termWidth        int
+	termHeight       int
 }
 
 func NewApp(
@@ -66,6 +87,7 @@ func NewApp(
 	db *store.DB,
 	interval time.Duration,
 	contextItems []string,
+	lastInput string,
 ) *App {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -76,9 +98,12 @@ func NewApp(
 		int(endTime.Sub(startTime).Minutes()),
 	)
 
+	input := newInputModel(timeInfo)
+	input.lastInput = lastInput
+
 	return &App{
 		state:       inputView,
-		input:       newInputModel(timeInfo),
+		input:       input,
 		spinner:     s,
 		startTime:   startTime,
 		endTime:     endTime,
@@ -92,14 +117,24 @@ func NewApp(
 	}
 }
 
+func (a *App) SetInitialInput(text string) {
+	a.input.textarea.SetValue(text)
+}
+
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(a.input.textarea.Focus(), a.spinner.Tick)
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		a.termWidth = wsMsg.Width
+		a.termHeight = wsMsg.Height
 		var cmd tea.Cmd
 		a.input, cmd = a.input.Update(wsMsg)
+		if a.state == loadingView {
+			a.viewport.Width = a.termWidth
+			a.viewport.Height = max(a.termHeight-3, 1)
+		}
 		return a, cmd
 	}
 
@@ -113,6 +148,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleAIResponse(msg)
 	case submitMsg:
 		return a.handleSubmit(msg)
+	case thinkingMsg:
+		a.thinkingText += msg.text
+		a.viewport.SetContent(a.thinkingText)
+		a.viewport.GotoBottom()
+		return a, readThinking(a.thinkCh)
+	case thinkingDoneMsg:
+		return a, nil
+	case tickMsg:
+		if a.state == loadingView {
+			return a, tickCmd()
+		}
+		return a, nil
 	}
 
 	switch a.state {
@@ -136,7 +183,10 @@ func (a *App) View() string {
 	case inputView:
 		return a.input.View()
 	case loadingView:
-		return a.spinner.View() + " Thinking..."
+		elapsed := time.Since(a.loadingStartTime).Truncate(time.Second)
+		header := fmt.Sprintf("%s Thinking...  %s", a.spinner.View(), dimStyle.Render(formatElapsed(elapsed)))
+		separator := dimStyle.Render(strings.Repeat("─", a.termWidth))
+		return header + "\n" + separator + "\n" + a.viewport.View()
 	case suggestionView:
 		return a.suggestions.View()
 	case editView:
@@ -158,7 +208,17 @@ func (a *App) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if keyMsg.String() == "enter" && a.input.Value() != "" {
 			a.state = loadingView
-			return a, tea.Batch(a.spinner.Tick, a.queryAI(a.input.Value()))
+			a.thinkingText = ""
+			a.loadingStartTime = time.Now()
+			a.viewport = viewport.New(a.termWidth, max(a.termHeight-3, 1))
+			ch := make(chan string, 100)
+			a.thinkCh = ch
+			return a, tea.Batch(
+				a.spinner.Tick,
+				a.startAI(a.input.Value(), ch),
+				readThinking(ch),
+				tickCmd(),
+			)
 		}
 	}
 
@@ -168,9 +228,13 @@ func (a *App) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	a.spinner, cmd = a.spinner.Update(msg)
-	return a, cmd
+	cmds = append(cmds, cmd)
+	a.viewport, cmd = a.viewport.Update(msg)
+	cmds = append(cmds, cmd)
+	return a, tea.Batch(cmds...)
 }
 
 func (a *App) updateSuggestion(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -249,14 +313,84 @@ func (a *App) handleSubmit(msg submitMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a *App) queryAI(description string) tea.Cmd {
+// startAI runs the AI provider in a goroutine, streaming thinking text to ch.
+func (a *App) startAI(description string, ch chan<- string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		resetIdle := idleTimeout(cancel, 2*time.Minute)
+
+		if cli, ok := a.provider.(*ai.ClaudeCLI); ok {
+			cli.OnThinking = func(text string) {
+				resetIdle()
+				select {
+				case ch <- text:
+				default:
+				}
+			}
+			defer func() { cli.OnThinking = nil }()
+		}
+		defer close(ch)
 
 		suggestion, err := a.provider.MatchProjects(ctx, description, a.projects, a.interval, a.contextItems)
 		return aiResponseMsg{suggestion: suggestion, err: err}
 	}
+}
+
+// readThinking reads the next chunk from the thinking channel.
+func readThinking(ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		text, ok := <-ch
+		if !ok {
+			return thinkingDoneMsg{}
+		}
+		return thinkingMsg{text: text}
+	}
+}
+
+// tickCmd returns a command that fires a tickMsg after 1 second.
+func tickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// formatElapsed formats a duration as "Xs" or "Xm Ys".
+func formatElapsed(d time.Duration) string {
+	s := int(d.Seconds())
+	if s < 60 {
+		return fmt.Sprintf("%ds", s)
+	}
+	return fmt.Sprintf("%dm %ds", s/60, s%60)
+}
+
+// idleTimeout runs a goroutine that cancels ctx after idleLimit of no activity.
+// Call the returned resetFunc from OnThinking to reset the idle timer.
+func idleTimeout(cancel context.CancelFunc, idleLimit time.Duration) (resetFunc func()) {
+	var mu sync.Mutex
+	lastActivity := time.Now()
+
+	reset := func() {
+		mu.Lock()
+		lastActivity = time.Now()
+		mu.Unlock()
+	}
+
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			mu.Lock()
+			idle := time.Since(lastActivity)
+			mu.Unlock()
+			if idle >= idleLimit {
+				cancel()
+				return
+			}
+		}
+	}()
+
+	return reset
 }
 
 func (a *App) submitAllocations(allocations []ai.Allocation) tea.Cmd {
@@ -294,6 +428,7 @@ func (a *App) submitAllocations(allocations []ai.Allocation) tea.Cmd {
 				ClockifyID:  clockifyID,
 				ProjectID:   alloc.ProjectID,
 				ProjectName: alloc.ProjectName,
+				ClientName:  alloc.ClientName,
 				Description: alloc.Description,
 				StartTime:   entryStart,
 				EndTime:     entryEnd,

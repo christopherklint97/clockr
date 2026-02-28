@@ -6,10 +6,12 @@ import (
 )
 
 type inputModel struct {
-	textarea textarea.Model
-	timeInfo string
-	width    int
-	height   int
+	textarea      textarea.Model
+	timeInfo      string
+	width         int
+	height        int
+	lastInput     string // previous description available via Ctrl+L
+	loadedLastMsg bool   // true after Ctrl+L was used (for transient feedback)
 }
 
 func newInputModel(timeInfo string) inputModel {
@@ -41,6 +43,13 @@ func (m inputModel) Update(msg tea.Msg) (inputModel, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg.String() == "ctrl+l" && m.lastInput != "" {
+			m.textarea.SetValue(m.lastInput)
+			m.loadedLastMsg = true
+			return m, nil
+		}
+	}
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
@@ -49,7 +58,11 @@ func (m inputModel) Update(msg tea.Msg) (inputModel, tea.Cmd) {
 func (m inputModel) View() string {
 	header := titleStyle.Render("clockr — Time Entry")
 	timeLabel := subtitleStyle.Render(m.timeInfo)
-	help := helpStyle.Render("Enter: submit • Ctrl+C: cancel")
+	helpParts := "Enter: submit • Ctrl+C: cancel"
+	if m.lastInput != "" {
+		helpParts += " • Ctrl+L: load last description"
+	}
+	help := helpStyle.Render(helpParts)
 
 	return header + "\n" + timeLabel + "\n" + m.textarea.View() + "\n" + help
 }

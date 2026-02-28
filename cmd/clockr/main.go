@@ -105,6 +105,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose debug logging")
 
 	logCmd.Flags().Bool("same", false, "Log the same project/description as the last entry")
+	logCmd.Flags().Bool("repeat", false, "Pre-fill the textarea with the last description")
 	logCmd.Flags().String("from", "", "Start date (YYYY-MM-DD, or natural: monday, last friday, etc.)")
 	logCmd.Flags().String("to", "", "End date (YYYY-MM-DD, or natural: friday, today, etc.)")
 	logCmd.Flags().Bool("github", false, "Include GitHub commit/PR context from saved repos")
@@ -175,6 +176,27 @@ func newAIProvider(cfg *config.Config, logger *slog.Logger) ai.Provider {
 	return ai.NewClaudeCLI(cfg.AI.Model, logger)
 }
 
+func enrichProjectsWithClients(ctx context.Context, client *clockify.Client, workspaceID string, projects []clockify.Project, logger *slog.Logger) {
+	logger.Debug("fetching clients")
+	clients, err := client.GetClients(ctx, workspaceID)
+	if err != nil {
+		logger.Debug("failed to fetch clients, continuing without client names", "error", err)
+		return
+	}
+	logger.Debug("clients loaded", "count", len(clients))
+
+	clientMap := make(map[string]string, len(clients))
+	for _, c := range clients {
+		clientMap[c.ID] = c.Name
+	}
+
+	for i := range projects {
+		if name, ok := clientMap[projects[i].ClientID]; ok {
+			projects[i].ClientName = name
+		}
+	}
+}
+
 func runStart(cmd *cobra.Command, args []string) error {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -232,6 +254,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 
 func runLog(cmd *cobra.Command, args []string) error {
 	same, _ := cmd.Flags().GetBool("same")
+	repeat, _ := cmd.Flags().GetBool("repeat")
 	fromStr, _ := cmd.Flags().GetString("from")
 	toStr, _ := cmd.Flags().GetString("to")
 	useGitHub, _ := cmd.Flags().GetBool("github")
@@ -245,6 +268,9 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	if same && useGitHub {
 		return fmt.Errorf("--same cannot be combined with --github")
+	}
+	if same && repeat {
+		return fmt.Errorf("--same cannot be combined with --repeat")
 	}
 
 	cfg, err := loadConfig()
@@ -274,7 +300,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	if fromStr != "" {
-		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub, logger)
+		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub, repeat, logger)
 	}
 
 	logger.Debug("fetching projects")
@@ -283,6 +309,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("fetching projects: %w", err)
 	}
 	logger.Debug("projects loaded", "count", len(projects))
+	enrichProjectsWithClients(ctx, client, workspaceID, projects, logger)
 
 	provider := newAIProvider(cfg, logger)
 	now := time.Now()
@@ -323,7 +350,11 @@ func runLog(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	app := tui.NewApp(startTime, endTime, provider, projects, client, workspaceID, db, interval, contextItems)
+	lastInput, _ := db.GetLastRawInput()
+	app := tui.NewApp(startTime, endTime, provider, projects, client, workspaceID, db, interval, contextItems, lastInput)
+	if repeat && lastInput != "" {
+		app.SetInitialInput(lastInput)
+	}
 	p := tea.NewProgram(app)
 
 	if _, err := p.Run(); err != nil {
@@ -338,7 +369,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool, logger *slog.Logger) error {
+func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool, repeat bool, logger *slog.Logger) error {
 	from, err := parseDate(fromStr)
 	if err != nil {
 		return fmt.Errorf("invalid --from date: %w", err)
@@ -376,6 +407,7 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 		return fmt.Errorf("fetching projects: %w", err)
 	}
 	logger.Debug("projects loaded", "count", len(projects))
+	enrichProjectsWithClients(ctx, client, workspaceID, projects, logger)
 
 	// Fetch calendar events for the full range and attach to day slots (per-day AI context)
 	if cfg.Calendar.Enabled && cfg.Calendar.Source != "" {
@@ -425,7 +457,11 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 	}
 
 	provider := newAIProvider(cfg, logger)
-	app := tui.NewBatchApp(days, provider, projects, client, workspaceID, db)
+	lastInput, _ := db.GetLastRawInput()
+	app := tui.NewBatchApp(days, provider, projects, client, workspaceID, db, lastInput)
+	if repeat && lastInput != "" {
+		app.SetInitialInput(lastInput)
+	}
 	p := tea.NewProgram(app)
 
 	if _, err := p.Run(); err != nil {
@@ -520,6 +556,22 @@ func runLogSame(ctx context.Context, cfg *config.Config, client *clockify.Client
 		return fmt.Errorf("no previous entries found")
 	}
 
+	// Verify the project still exists in Clockify
+	projects, err := client.GetProjects(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("fetching projects: %w", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.ID == last.ProjectID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("project %q (%s) from last entry no longer exists in Clockify — use 'clockr log' instead", last.ProjectName, last.ProjectID)
+	}
+
 	now := time.Now()
 	interval := time.Duration(cfg.Schedule.IntervalMinutes) * time.Minute
 	startTime := now.Add(-interval)
@@ -547,6 +599,7 @@ func runLogSame(ctx context.Context, cfg *config.Config, client *clockify.Client
 		ClockifyID:  clockifyID,
 		ProjectID:   last.ProjectID,
 		ProjectName: last.ProjectName,
+		ClientName:  last.ClientName,
 		Description: last.Description,
 		StartTime:   startTime,
 		EndTime:     endTime,
@@ -588,11 +641,15 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	for _, e := range entries {
 		localStart := e.StartTime.Local()
 		localEnd := e.EndTime.Local()
-		fmt.Printf("  %s–%s  %dmin  %-20s  %s  [%s]\n",
+		projectDisplay := e.ProjectName
+		if e.ClientName != "" {
+			projectDisplay = e.ClientName + " / " + e.ProjectName
+		}
+		fmt.Printf("  %s–%s  %dmin  %-30s  %s  [%s]\n",
 			localStart.Format("15:04"),
 			localEnd.Format("15:04"),
 			e.Minutes,
-			e.ProjectName,
+			projectDisplay,
 			e.Description,
 			e.Status,
 		)
@@ -625,6 +682,7 @@ func runProjects(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("fetching projects: %w", err)
 	}
+	enrichProjectsWithClients(ctx, client, workspaceID, projects, logger)
 
 	if len(projects) == 0 {
 		fmt.Println("No projects found.")
@@ -633,7 +691,11 @@ func runProjects(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Found %d projects:\n\n", len(projects))
 	for _, p := range projects {
-		fmt.Printf("  %s  %s\n", p.ID, p.Name)
+		if p.ClientName != "" {
+			fmt.Printf("  %s  %s / %s\n", p.ID, p.ClientName, p.Name)
+		} else {
+			fmt.Printf("  %s  %s\n", p.ID, p.Name)
+		}
 	}
 
 	return nil

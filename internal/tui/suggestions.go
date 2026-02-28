@@ -33,10 +33,15 @@ func (m suggestionsModel) View() string {
 			prefix = "> "
 		}
 
+		projectDisplay := a.ProjectName
+		if a.ClientName != "" {
+			projectDisplay = a.ClientName + " / " + a.ProjectName
+		}
+
 		confidence := fmt.Sprintf("%.0f%%", a.Confidence*100)
-		line := fmt.Sprintf("%s%-20s  %3dmin  %s  %s",
+		line := fmt.Sprintf("%s%-30s  %3dmin  %s  %s",
 			prefix,
-			a.ProjectName,
+			projectDisplay,
 			a.Minutes,
 			dimStyle.Render(confidence),
 			a.Description,
