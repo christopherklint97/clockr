@@ -83,7 +83,7 @@ clockr projects   # should list your Clockify projects
 clockr log
 ```
 
-Opens a TUI where you describe your work in plain English. The AI matches it to your Clockify projects and suggests time allocations. You can accept, edit, retry, or skip.
+Opens a TUI where you first confirm the duration (defaults to your configured interval), then describe your work in plain English. The AI matches it to your Clockify projects and suggests time allocations. You can accept, edit, retry, or skip.
 
 ### Repeat the last entry
 

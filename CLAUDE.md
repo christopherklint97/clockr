@@ -42,6 +42,7 @@ internal/
   tui/
     app.go                    — Bubbletea root model, view state machine (single entry)
     batch.go                  — BatchApp TUI for multi-day time entry (--from/--to)
+    duration.go               — Duration prompt view (single entry only, lets user override interval)
     input.go                  — Text input view (shared by single and batch)
     suggestions.go            — Suggestion display with accept/edit/retry/skip
     edit.go                   — Inline allocation editor with fuzzy project search
@@ -59,7 +60,7 @@ internal/
 - Config/DB/PID files live in `~/.config/clockr/`
 - The AI provider (OpenRouter) uses the OpenAI-compatible API with JSON schema for structured output
 - Time entries store both in Clockify and local SQLite; failed Clockify entries are retried automatically
-- The TUI uses a view state machine: input → loading → suggestion → edit → confirmation
+- The TUI uses a view state machine: duration → input → loading → suggestion → edit → confirmation (duration view only in single-entry mode)
 - The batch TUI (`BatchApp`) has its own parallel state machine with the same flow but day-grouped views
 - Clockify credentials can be set via environment variables (`CLOCKIFY_API_KEY`, `CLOCKIFY_WORKSPACE_ID`) for `.env`/direnv support; AI key via `OPENROUTER_API_KEY`
 - Calendar integration supports ICS (URL/file) or Microsoft Graph API (`source = "graph"`); batch mode groups events by day
@@ -74,6 +75,7 @@ internal/
 ## Testing
 
 ```sh
+go test ./...
 go vet ./...
 ```
 

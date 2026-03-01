@@ -18,7 +18,8 @@ import (
 type viewState int
 
 const (
-	inputView viewState = iota
+	durationView viewState = iota
+	inputView
 	loadingView
 	suggestionView
 	editView
@@ -53,6 +54,7 @@ type tickMsg time.Time
 
 type App struct {
 	state       viewState
+	duration    durationModel
 	input       inputModel
 	spinner     spinner.Model
 	suggestions suggestionsModel
@@ -104,7 +106,8 @@ func NewApp(
 	input.lastInput = lastInput
 
 	return &App{
-		state:       inputView,
+		state:       durationView,
+		duration:    newDurationModel(int(interval.Minutes())),
 		input:       input,
 		spinner:     s,
 		startTime:   startTime,
@@ -124,7 +127,7 @@ func (a *App) SetInitialInput(text string) {
 }
 
 func (a *App) Init() tea.Cmd {
-	return tea.Batch(a.input.textarea.Focus(), a.spinner.Tick)
+	return tea.Batch(a.duration.textinput.Focus(), a.spinner.Tick)
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -166,6 +169,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch a.state {
+	case durationView:
+		return a.updateDuration(msg)
 	case inputView:
 		return a.updateInput(msg)
 	case loadingView:
@@ -183,6 +188,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) View() string {
 	switch a.state {
+	case durationView:
+		return a.duration.View()
 	case inputView:
 		return a.input.View()
 	case loadingView:
@@ -209,6 +216,34 @@ func (a *App) View() string {
 
 func (a *App) GetResult() *Result {
 	return a.result
+}
+
+func (a *App) updateDuration(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg.String() == "enter" {
+			minutes := a.duration.Value()
+			a.interval = time.Duration(minutes) * time.Minute
+			a.endTime = time.Now()
+			a.startTime = a.endTime.Add(-a.interval)
+
+			timeInfo := fmt.Sprintf("%s – %s (%d min)",
+				a.startTime.Format("15:04"),
+				a.endTime.Format("15:04"),
+				minutes,
+			)
+
+			newInput := newInputModel(timeInfo)
+			newInput.lastInput = a.input.lastInput
+			newInput, _ = newInput.Update(tea.WindowSizeMsg{Width: a.termWidth, Height: a.termHeight})
+			a.input = newInput
+			a.state = inputView
+			return a, a.input.textarea.Focus()
+		}
+	}
+
+	var cmd tea.Cmd
+	a.duration, cmd = a.duration.Update(msg)
+	return a, cmd
 }
 
 func (a *App) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
