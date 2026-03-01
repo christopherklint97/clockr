@@ -27,8 +27,11 @@ internal/
   ai/
     provider.go               — Provider interface
     claude_cli.go             — Calls `claude` CLI subprocess with --json-schema
+    claude_cli_test.go        — Tests for Claude CLI provider
     anthropic_api.go          — Stub for direct Anthropic API fallback
     prompt.go                 — System prompt builder, JSON schema definition (single + batch)
+    prompt_file.go            — File-based prompt provider: writes prompt to file/clipboard, waits for manual response
+    tmux.go                   — Tmux pane detection and auto-injection of prompts into Claude Code sessions
     models.go                 — Suggestion, Allocation, DaySlot, BatchAllocation, BatchSuggestion types
   calendar/
     calendar.go               — iCal fetch (URL or file), GroupByDay, FormatPrefill
@@ -65,6 +68,9 @@ internal/
 - Microsoft Graph integration uses OAuth2 device code flow; tokens cached in `~/.config/clockr/msgraph_tokens.json` with auto-refresh; requires Azure AD app with `Calendars.Read` delegated permission; config via `[calendar.graph]` or `MSGRAPH_CLIENT_ID`/`MSGRAPH_TENANT_ID` env vars
 - GitHub integration (`--github` flag) fetches commits/PRs from user-selected repos; token resolved via `gh auth token` → `GITHUB_TOKEN` env → config; repos saved to config after first picker selection
 - `--from`/`--to` flags accept `YYYY-MM-DD` or natural language dates (e.g., `monday`, `last friday`, `today`) via `tj/go-naturaldate`; bare weekday names default to past direction
+- `--repeat` flag (and Ctrl+L in TUI) reuses the last description without re-typing
+- `--prompt-file` flag writes the AI prompt to `~/.config/clockr/tmp/clockr_prompt.md` and clipboard instead of calling Claude CLI; if running in tmux, auto-injects into an adjacent Claude Code pane; waits for user to press Enter after the response is written to `~/.config/clockr/tmp/clockr_response.json`
+- All runtime files (config, DB, PID, tokens, temp prompt/response) are stored under `~/.config/clockr/`
 
 ## Important rules
 
@@ -76,7 +82,7 @@ internal/
 go vet ./...
 ```
 
-No test files yet.
+Test files exist for the AI package (`internal/ai/claude_cli_test.go`).
 
 ## Dependencies
 

@@ -90,6 +90,14 @@ Opens a TUI where you describe your work in plain English. Claude matches it to 
 clockr log --same
 ```
 
+### Pre-fill the last description
+
+```sh
+clockr log --repeat
+```
+
+Pre-fills the TUI with your last description. You can also press `Ctrl+L` inside the TUI to load it.
+
 ### Log a date range (batch mode)
 
 ```sh
@@ -166,6 +174,15 @@ Test it with:
 clockr calendar test
 ```
 
+### Prompt file mode
+
+```sh
+clockr log --prompt-file
+clockr log --from monday --to friday --prompt-file
+```
+
+Instead of calling the Claude CLI directly, writes the AI prompt to `~/.config/clockr/tmp/clockr_prompt.md` and copies it to your clipboard. If you're in tmux with a Claude Code session in an adjacent pane, the prompt is automatically injected. Press Enter in the TUI once the response has been written to `~/.config/clockr/tmp/clockr_response.json`.
+
 ### Run the scheduler
 
 ```sh
@@ -192,8 +209,10 @@ clockr status
 | `clockr stop` | Stop the running scheduler |
 | `clockr log` | Log a time entry interactively |
 | `clockr log --same` | Repeat last entry for current interval |
+| `clockr log --repeat` | Pre-fill TUI with last description (also Ctrl+L) |
 | `clockr log --from DATE --to DATE` | Batch log a date range (supports natural language dates) |
 | `clockr log --github` | Include GitHub commit/PR context (combinable with other flags) |
+| `clockr log --prompt-file` | Write prompt to file/clipboard instead of calling Claude CLI |
 | `clockr status` | Show today's logged entries |
 | `clockr projects` | List Clockify projects |
 | `clockr config` | Open config in $EDITOR |
@@ -216,3 +235,4 @@ clockr status
 - Graph API tokens: `~/.config/clockr/msgraph_tokens.json`
 - Database: `~/.config/clockr/clockr.db`
 - PID file: `~/.config/clockr/clockr.pid`
+- Prompt file temp: `~/.config/clockr/tmp/`
