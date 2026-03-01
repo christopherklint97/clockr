@@ -109,7 +109,7 @@ func init() {
 	logCmd.Flags().String("from", "", "Start date (YYYY-MM-DD, or natural: monday, last friday, etc.)")
 	logCmd.Flags().String("to", "", "End date (YYYY-MM-DD, or natural: friday, today, etc.)")
 	logCmd.Flags().Bool("github", false, "Include GitHub commit/PR context from saved repos")
-	logCmd.Flags().Bool("prompt-file", false, "Write prompt to file and clipboard instead of calling Claude CLI")
+	logCmd.Flags().Bool("prompt-file", false, "Write prompt to file and clipboard instead of calling the AI API")
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
@@ -174,7 +174,28 @@ func resolveWorkspaceID(ctx context.Context, cfg *config.Config, client *clockif
 }
 
 func newAIProvider(cfg *config.Config, logger *slog.Logger) ai.Provider {
-	return ai.NewClaudeCLI(cfg.AI.Model, logger)
+	switch cfg.AI.Provider {
+	case "openrouter", "":
+		apiKey := cfg.AI.OpenRouterAPIKey
+		if apiKey == "" {
+			apiKey = cfg.AI.APIKey
+		}
+		if err := ai.VerifyOpenRouterAPIKey(apiKey); err != nil {
+			logger.Warn("OpenRouter API key not found", "error", err)
+		}
+		logger.Debug("using OpenRouter provider", "model", cfg.AI.Model)
+		return ai.NewOpenRouter(apiKey, cfg.AI.Model, logger)
+	case "anthropic-api":
+		logger.Warn("anthropic-api provider has been replaced by openrouter, using OpenRouter")
+		apiKey := cfg.AI.OpenRouterAPIKey
+		if apiKey == "" {
+			apiKey = cfg.AI.APIKey
+		}
+		return ai.NewOpenRouter(apiKey, cfg.AI.Model, logger)
+	default:
+		logger.Warn("unknown AI provider, using OpenRouter", "provider", cfg.AI.Provider)
+		return ai.NewOpenRouter(cfg.AI.OpenRouterAPIKey, cfg.AI.Model, logger)
+	}
 }
 
 func enrichProjectsWithClients(ctx context.Context, client *clockify.Client, workspaceID string, projects []clockify.Project, logger *slog.Logger) {
@@ -789,6 +810,7 @@ work_days = [1, 2, 3, 4, 5]
 [ai]
 provider = "%s"
 model = "%s"
+# api_key = ""  # or set OPENROUTER_API_KEY env var
 
 [notifications]
 enabled = %t

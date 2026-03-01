@@ -9,8 +9,9 @@ work_end = "17:00"
 work_days = [1, 2, 3, 4, 5]  # Monday=1 through Friday=5
 
 [ai]
-provider = "claude-cli"  # "claude-cli" or "anthropic-api"
-model = "sonnet"
+provider = "openrouter"  # "openrouter" (default)
+model = "anthropic/claude-sonnet-4-6"
+# api_key = ""  # or set OPENROUTER_API_KEY env var
 
 [notifications]
 enabled = true

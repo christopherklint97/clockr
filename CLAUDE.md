@@ -2,7 +2,7 @@
 
 ## Project overview
 
-clockr is a Go CLI time-tracking assistant. It prompts the user for plain-English work descriptions, uses Claude (via the `claude` CLI) to match them to Clockify projects, and creates time entries.
+clockr is a Go CLI time-tracking assistant. It prompts the user for plain-English work descriptions, uses AI (via OpenRouter) to match them to Clockify projects, and creates time entries.
 
 ## Build & run
 
@@ -26,9 +26,7 @@ internal/
     entries.go                — Entry CRUD (insert, today, last, failed queries)
   ai/
     provider.go               — Provider interface
-    claude_cli.go             — Calls `claude` CLI subprocess with --json-schema
-    claude_cli_test.go        — Tests for Claude CLI provider
-    anthropic_api.go          — Stub for direct Anthropic API fallback
+    openrouter.go             — OpenRouter API provider (OpenAI-compatible SDK), JSON schema helpers
     prompt.go                 — System prompt builder, JSON schema definition (single + batch)
     prompt_file.go            — File-based prompt provider: writes prompt to file/clipboard, waits for manual response
     tmux.go                   — Tmux pane detection and auto-injection of prompts into Claude Code sessions
@@ -59,30 +57,24 @@ internal/
 - All commands are defined in `cmd/clockr/main.go` — no separate command files
 - Clockify API base URL: `https://api.clockify.me/api/v1`
 - Config/DB/PID files live in `~/.config/clockr/`
-- The Claude CLI is invoked with `--output-format json --json-schema` for structured output
+- The AI provider (OpenRouter) uses the OpenAI-compatible API with JSON schema for structured output
 - Time entries store both in Clockify and local SQLite; failed Clockify entries are retried automatically
 - The TUI uses a view state machine: input → loading → suggestion → edit → confirmation
 - The batch TUI (`BatchApp`) has its own parallel state machine with the same flow but day-grouped views
-- Clockify credentials can be set via environment variables (`CLOCKIFY_API_KEY`, `CLOCKIFY_WORKSPACE_ID`) for `.env`/direnv support
+- Clockify credentials can be set via environment variables (`CLOCKIFY_API_KEY`, `CLOCKIFY_WORKSPACE_ID`) for `.env`/direnv support; AI key via `OPENROUTER_API_KEY`
 - Calendar integration supports ICS (URL/file) or Microsoft Graph API (`source = "graph"`); batch mode groups events by day
 - Microsoft Graph integration uses OAuth2 device code flow; tokens cached in `~/.config/clockr/msgraph_tokens.json` with auto-refresh; requires Azure AD app with `Calendars.Read` delegated permission; config via `[calendar.graph]` or `MSGRAPH_CLIENT_ID`/`MSGRAPH_TENANT_ID` env vars
 - GitHub integration (`--github` flag) fetches commits/PRs from user-selected repos; token resolved via `gh auth token` → `GITHUB_TOKEN` env → config; repos saved to config after first picker selection
 - `--from`/`--to` flags accept `YYYY-MM-DD` or natural language dates (e.g., `monday`, `last friday`, `today`) via `tj/go-naturaldate`; bare weekday names default to past direction
 - `--repeat` flag (and Ctrl+L in TUI) reuses the last description without re-typing
-- `--prompt-file` flag writes the AI prompt to `~/.config/clockr/tmp/clockr_prompt.md` and clipboard instead of calling Claude CLI; if running in tmux, auto-injects into an adjacent Claude Code pane; waits for user to press Enter after the response is written to `~/.config/clockr/tmp/clockr_response.json`
+- `--prompt-file` flag writes the AI prompt to `~/.config/clockr/tmp/clockr_prompt.md` and clipboard instead of calling the AI API; if running in tmux, auto-injects into an adjacent Claude Code pane; waits for user to press Enter after the response is written to `~/.config/clockr/tmp/clockr_response.json`
 - All runtime files (config, DB, PID, tokens, temp prompt/response) are stored under `~/.config/clockr/`
-
-## Important rules
-
-- Do NOT attempt to run `claude` CLI commands (e.g., `claude -p ...`). The nested session check will block them. Only modify the code that invokes the CLI — never run it directly.
 
 ## Testing
 
 ```sh
 go vet ./...
 ```
-
-Test files exist for the AI package (`internal/ai/claude_cli_test.go`).
 
 ## Dependencies
 
@@ -95,3 +87,5 @@ Test files exist for the AI package (`internal/ai/claude_cli_test.go`).
 - `github.com/gen2brain/beeep` — Desktop notifications
 - `github.com/emersion/go-ical` — iCalendar parsing for calendar integration
 - `github.com/tj/go-naturaldate` — Natural language date parsing for `--from`/`--to` flags
+- `github.com/openai/openai-go/v3` — OpenAI-compatible SDK (used with OpenRouter)
+- `github.com/invopop/jsonschema` — JSON schema generation for structured AI output

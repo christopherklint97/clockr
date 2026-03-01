@@ -36,8 +36,10 @@ type ScheduleConfig struct {
 }
 
 type AIConfig struct {
-	Provider string `toml:"provider"` // "claude-cli" or "anthropic-api"
-	Model    string `toml:"model"`
+	Provider         string `toml:"provider"` // "openrouter" (default) or "anthropic-api"
+	Model            string `toml:"model"`
+	APIKey           string `toml:"api_key"`
+	OpenRouterAPIKey string `toml:"openrouter_api_key"`
 }
 
 type NotifyConfig struct {
@@ -65,8 +67,8 @@ func DefaultConfig() Config {
 			WorkDays:        []int{1, 2, 3, 4, 5},
 		},
 		AI: AIConfig{
-			Provider: "claude-cli",
-			Model:    "sonnet",
+			Provider: "openrouter",
+			Model:    "anthropic/claude-sonnet-4-6",
 		},
 		Notifications: NotifyConfig{
 			Enabled:       true,
@@ -139,6 +141,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("MSGRAPH_TENANT_ID"); v != "" {
 		cfg.Calendar.Graph.TenantID = v
+	}
+	if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" {
+		cfg.AI.APIKey = v
+	}
+	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
+		cfg.AI.OpenRouterAPIKey = v
 	}
 }
 

@@ -343,7 +343,7 @@ func (a *App) startAI(description string, ch chan<- string) tea.Cmd {
 		defer cancel()
 
 		switch p := a.provider.(type) {
-		case *ai.ClaudeCLI:
+		case *ai.OpenRouterProvider:
 			resetIdle := idleTimeout(cancel, 2*time.Minute)
 			p.OnThinking = func(text string) {
 				resetIdle()

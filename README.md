@@ -1,11 +1,11 @@
 # clockr
 
-AI-powered time-tracking CLI that prompts you periodically, takes plain-English descriptions of your work, uses Claude to match them to Clockify projects, and creates time entries.
+AI-powered time-tracking CLI that prompts you periodically, takes plain-English descriptions of your work, uses AI (via OpenRouter) to match them to Clockify projects, and creates time entries.
 
 ## Prerequisites
 
 - Go 1.24+
-- [claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
+- An [OpenRouter](https://openrouter.ai) API key (or any OpenAI-compatible API)
 - A [Clockify](https://clockify.me) account and API key
 
 ## Install
@@ -49,8 +49,9 @@ work_end = "17:00"
 work_days = [1, 2, 3, 4, 5]
 
 [ai]
-provider = "claude-cli"
-model = "sonnet"
+provider = "openrouter"
+model = "anthropic/claude-sonnet-4-6"
+# api_key = ""  # or set OPENROUTER_API_KEY env var
 
 [notifications]
 enabled = true
@@ -82,7 +83,7 @@ clockr projects   # should list your Clockify projects
 clockr log
 ```
 
-Opens a TUI where you describe your work in plain English. Claude matches it to your Clockify projects and suggests time allocations. You can accept, edit, retry, or skip.
+Opens a TUI where you describe your work in plain English. The AI matches it to your Clockify projects and suggests time allocations. You can accept, edit, retry, or skip.
 
 ### Repeat the last entry
 
@@ -112,7 +113,7 @@ Opens a batch TUI for logging multiple days at once. The AI sees all work days i
 
 ### GitHub integration
 
-Add GitHub commit and PR context to help Claude match your work to projects:
+Add GitHub commit and PR context to help the AI match your work to projects:
 
 ```sh
 clockr log --github
@@ -181,7 +182,7 @@ clockr log --prompt-file
 clockr log --from monday --to friday --prompt-file
 ```
 
-Instead of calling the Claude CLI directly, writes the AI prompt to `~/.config/clockr/tmp/clockr_prompt.md` and copies it to your clipboard. If you're in tmux with a Claude Code session in an adjacent pane, the prompt is automatically injected. Press Enter in the TUI once the response has been written to `~/.config/clockr/tmp/clockr_response.json`.
+Instead of calling the AI API directly, writes the AI prompt to `~/.config/clockr/tmp/clockr_prompt.md` and copies it to your clipboard. If you're in tmux with a Claude Code session in an adjacent pane, the prompt is automatically injected. Press Enter in the TUI once the response has been written to `~/.config/clockr/tmp/clockr_response.json`.
 
 ### Run the scheduler
 
@@ -212,7 +213,7 @@ clockr status
 | `clockr log --repeat` | Pre-fill TUI with last description (also Ctrl+L) |
 | `clockr log --from DATE --to DATE` | Batch log a date range (supports natural language dates) |
 | `clockr log --github` | Include GitHub commit/PR context (combinable with other flags) |
-| `clockr log --prompt-file` | Write prompt to file/clipboard instead of calling Claude CLI |
+| `clockr log --prompt-file` | Write prompt to file/clipboard instead of calling the AI API |
 | `clockr status` | Show today's logged entries |
 | `clockr projects` | List Clockify projects |
 | `clockr config` | Open config in $EDITOR |
@@ -224,7 +225,7 @@ clockr status
 ## How it works
 
 1. You describe your work in plain English (e.g., "reviewed PRs and fixed auth bug")
-2. Claude matches your description to your Clockify projects and suggests time allocations
+2. The AI matches your description to your Clockify projects and suggests time allocations
 3. You accept, edit, or retry the suggestions in the TUI
 4. Entries are created in Clockify and stored locally in SQLite
 5. Failed entries are automatically retried on the next scheduler tick

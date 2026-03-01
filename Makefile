@@ -1,4 +1,4 @@
-.PHONY: build run install clean vet test test-integration
+.PHONY: build run install clean vet test
 
 build:
 	go build -o bin/clockr ./cmd/clockr
@@ -14,9 +14,6 @@ vet:
 
 test: vet
 	go test ./...
-
-test-integration: vet
-	go test -tags integration -v -timeout 120s ./internal/ai/...
 
 clean:
 	rm -rf bin/
