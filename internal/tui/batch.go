@@ -168,7 +168,11 @@ func (a *BatchApp) View() string {
 		return a.input.View()
 	case batchLoadingView:
 		elapsed := time.Since(a.loadingStartTime).Truncate(time.Second)
-		header := fmt.Sprintf("%s Thinking...  %s", a.spinner.View(), dimStyle.Render(formatElapsed(elapsed)))
+		label := "Thinking..."
+		if _, ok := a.provider.(*ai.PromptFileProvider); ok {
+			label = "Waiting for response..."
+		}
+		header := fmt.Sprintf("%s %s  %s", a.spinner.View(), label, dimStyle.Render(formatElapsed(elapsed)))
 		separator := dimStyle.Render(strings.Repeat("─", a.termWidth))
 		return header + "\n" + separator + "\n" + a.viewport.View()
 	case batchSuggestionView:
