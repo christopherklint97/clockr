@@ -55,7 +55,7 @@ model = "anthropic/claude-sonnet-4-6"
 
 [notifications]
 enabled = true
-reminder_delay_seconds = 300
+snooze_options = [5, 15]
 
 [calendar]
 enabled = false
@@ -190,7 +190,17 @@ Instead of calling the AI API directly, writes the AI prompt to `~/.config/clock
 clockr start
 ```
 
-Runs in the foreground (use tmux/screen to background). Prompts you at each interval during work hours with a desktop notification and TUI.
+Runs in the foreground (use tmux/screen to background). Prompts you at each interval during work hours with a dialog and TUI.
+
+#### Notification dialog
+
+When a scheduler tick fires, clockr shows a platform-aware dialog with three options:
+
+- **Log Now** — opens the TUI immediately
+- **Snooze** (5 min, 15 min) — re-prompts after the chosen delay
+- **Next Timer** — skips this tick entirely
+
+On macOS the dialog uses `osascript` (native system dialog). On Linux it tries `zenity`, then `kdialog`, then falls back to a terminal menu. Snooze durations are configurable via `snooze_options` in `[notifications]`. Set `enabled = false` to skip the dialog and go straight to the TUI.
 
 ```sh
 clockr stop       # sends SIGTERM to the running scheduler

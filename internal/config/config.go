@@ -43,8 +43,9 @@ type AIConfig struct {
 }
 
 type NotifyConfig struct {
-	Enabled       bool `toml:"enabled"`
-	ReminderDelay int  `toml:"reminder_delay_seconds"`
+	Enabled       bool  `toml:"enabled"`
+	ReminderDelay int   `toml:"reminder_delay_seconds"`
+	SnoozeOptions []int `toml:"snooze_options"`
 }
 
 type CalendarConfig struct {
@@ -73,6 +74,7 @@ func DefaultConfig() Config {
 		Notifications: NotifyConfig{
 			Enabled:       true,
 			ReminderDelay: 300,
+			SnoozeOptions: []int{5, 15},
 		},
 		Calendar: CalendarConfig{
 			Enabled: false,

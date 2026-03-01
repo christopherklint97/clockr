@@ -814,7 +814,7 @@ model = "%s"
 
 [notifications]
 enabled = %t
-reminder_delay_seconds = %d
+snooze_options = [5, 15]
 
 [calendar]
 enabled = %t
@@ -836,7 +836,6 @@ source = "%s"
 			cfg.AI.Provider,
 			cfg.AI.Model,
 			cfg.Notifications.Enabled,
-			cfg.Notifications.ReminderDelay,
 			cfg.Calendar.Enabled,
 			cfg.Calendar.Source,
 		)

@@ -68,9 +68,45 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	}
 }
 
+// showDialogWithSnooze shows the prompt dialog in a loop, handling snooze
+// internally. Returns only ActionLogNow or ActionNextTimer.
+func (s *Scheduler) showDialogWithSnooze(ctx context.Context) DialogAction {
+	for {
+		result, err := ShowPromptDialog(
+			ctx,
+			"clockr",
+			"What did you work on this hour?",
+			s.cfg.Notifications.SnoozeOptions,
+		)
+		if err != nil {
+			// On error (including context cancellation), default to log now
+			// so we don't silently skip prompts.
+			return ActionLogNow
+		}
+
+		if result.Action != ActionSnooze {
+			return result.Action
+		}
+
+		// Snooze: wait then re-show dialog.
+		fmt.Printf("Snoozed for %d minutes.\n", result.SnoozeMinutes)
+		snoozeTimer := time.NewTimer(time.Duration(result.SnoozeMinutes) * time.Minute)
+		select {
+		case <-ctx.Done():
+			snoozeTimer.Stop()
+			return ActionLogNow
+		case <-snoozeTimer.C:
+		}
+	}
+}
+
 func (s *Scheduler) prompt(ctx context.Context, tickTime time.Time, interval time.Duration) {
 	if s.cfg.Notifications.Enabled {
-		SendNotification("clockr", "What did you work on this hour?")
+		action := s.showDialogWithSnooze(ctx)
+		if action == ActionNextTimer {
+			fmt.Println("Skipped to next timer.")
+			return
+		}
 	}
 
 	projects, err := s.client.GetProjects(ctx, s.workspaceID)
