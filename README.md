@@ -97,7 +97,7 @@ clockr log --same
 clockr log --repeat
 ```
 
-Pre-fills the TUI with your last description. You can also press `Ctrl+L` inside the TUI to load it.
+Pre-fills the TUI with your last description. You can also press `Ctrl+R` inside the TUI to load it.
 
 ### Log a date range (batch mode)
 
@@ -220,7 +220,7 @@ clockr status
 | `clockr stop` | Stop the running scheduler |
 | `clockr log` | Log a time entry interactively |
 | `clockr log --same` | Repeat last entry for current interval |
-| `clockr log --repeat` | Pre-fill TUI with last description (also Ctrl+L) |
+| `clockr log --repeat` | Pre-fill TUI with last description (also Ctrl+R) |
 | `clockr log --from DATE --to DATE` | Batch log a date range (supports natural language dates) |
 | `clockr log --github` | Include GitHub commit/PR context (combinable with other flags) |
 | `clockr log --prompt-file` | Write prompt to file/clipboard instead of calling the AI API |

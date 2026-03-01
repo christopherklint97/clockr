@@ -67,7 +67,7 @@ internal/
 - Microsoft Graph integration uses OAuth2 device code flow; tokens cached in `~/.config/clockr/msgraph_tokens.json` with auto-refresh; requires Azure AD app with `Calendars.Read` delegated permission; config via `[calendar.graph]` or `MSGRAPH_CLIENT_ID`/`MSGRAPH_TENANT_ID` env vars
 - GitHub integration (`--github` flag) fetches commits/PRs from user-selected repos; token resolved via `gh auth token` → `GITHUB_TOKEN` env → config; repos saved to config after first picker selection
 - `--from`/`--to` flags accept `YYYY-MM-DD` or natural language dates (e.g., `monday`, `last friday`, `today`) via `tj/go-naturaldate`; bare weekday names default to past direction
-- `--repeat` flag (and Ctrl+L in TUI) reuses the last description without re-typing
+- `--repeat` flag (and Ctrl+R in TUI) reuses the last description without re-typing
 - `--prompt-file` flag writes the AI prompt to `~/.config/clockr/tmp/clockr_prompt.md` and clipboard instead of calling the AI API; if running in tmux, auto-injects into an adjacent Claude Code pane; waits for user to press Enter after the response is written to `~/.config/clockr/tmp/clockr_response.json`
 - Scheduler notifications show a platform-aware dialog (Log Now / Snooze / Next Timer); snooze durations configured via `snooze_options` in `[notifications]`; `enabled = false` skips the dialog
 - All runtime files (config, DB, PID, tokens, temp prompt/response) are stored under `~/.config/clockr/`
