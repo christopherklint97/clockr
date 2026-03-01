@@ -18,18 +18,26 @@ import (
 
 // cleanEnv returns os.Environ() with Claude Code session vars removed
 // so the subprocess doesn't get blocked by the nested-session check.
+// It also injects env vars to enable extended thinking with high effort.
 func cleanEnv() []string {
 	blocked := map[string]bool{
-		"CLAUDECODE":                         true,
-		"CLAUDE_CODE_ENTRYPOINT":             true,
+		"CLAUDECODE":                           true,
+		"CLAUDE_CODE_ENTRYPOINT":               true,
 		"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": true,
+	}
+	overrides := map[string]string{
+		"CLAUDE_CODE_EFFORT_LEVEL": "high",
 	}
 	var env []string
 	for _, e := range os.Environ() {
 		key, _, _ := strings.Cut(e, "=")
-		if !blocked[key] {
-			env = append(env, e)
+		if blocked[key] || overrides[key] != "" {
+			continue
 		}
+		env = append(env, e)
+	}
+	for k, v := range overrides {
+		env = append(env, k+"="+v)
 	}
 	return env
 }
@@ -59,10 +67,7 @@ func (c *ClaudeCLI) MatchProjects(ctx context.Context, description string, proje
 		"--output-format", "json",
 		"--model", c.Model,
 		"--system-prompt", systemPrompt,
-		"--json-schema", jsonSchema,
 		"--no-session-persistence",
-		"--effort", "low",
-		"--no-thinking",
 	}
 
 	c.logger.Debug("invoking claude CLI",
@@ -72,7 +77,6 @@ func (c *ClaudeCLI) MatchProjects(ctx context.Context, description string, proje
 		"context_items", len(contextItems),
 		"system_prompt_len", len(systemPrompt),
 		"user_prompt_len", len(userPrompt),
-		"schema_len", len(jsonSchema),
 	)
 
 	result, err := c.runCLI(ctx, args)
@@ -85,8 +89,14 @@ func (c *ClaudeCLI) MatchProjects(ctx context.Context, description string, proje
 		"result", truncateStr(result, 2000),
 	)
 
+	jsonStr := extractJSON(result)
+	c.logger.Debug("extracted JSON from result",
+		"json_len", len(jsonStr),
+		"json", truncateStr(jsonStr, 2000),
+	)
+
 	var suggestion Suggestion
-	if err := json.Unmarshal([]byte(result), &suggestion); err != nil {
+	if err := json.Unmarshal([]byte(jsonStr), &suggestion); err != nil {
 		c.logger.Error("failed to parse suggestion",
 			"error", err,
 			"raw", truncateStr(result, 2000),
@@ -120,10 +130,7 @@ func (c *ClaudeCLI) MatchProjectsBatch(ctx context.Context, description string, 
 		"--output-format", "json",
 		"--model", c.Model,
 		"--system-prompt", systemPrompt,
-		"--json-schema", batchJSONSchema,
 		"--no-session-persistence",
-		"--effort", "low",
-		"--no-thinking",
 	}
 
 	c.logger.Debug("invoking claude CLI (batch)",
@@ -133,7 +140,6 @@ func (c *ClaudeCLI) MatchProjectsBatch(ctx context.Context, description string, 
 		"projects", len(projects),
 		"system_prompt_len", len(systemPrompt),
 		"user_prompt_len", len(userPrompt),
-		"schema_len", len(batchJSONSchema),
 	)
 
 	result, err := c.runCLI(ctx, args)
@@ -146,8 +152,14 @@ func (c *ClaudeCLI) MatchProjectsBatch(ctx context.Context, description string, 
 		"result", truncateStr(result, 2000),
 	)
 
+	jsonStr := extractJSON(result)
+	c.logger.Debug("extracted JSON from batch result",
+		"json_len", len(jsonStr),
+		"json", truncateStr(jsonStr, 2000),
+	)
+
 	var suggestion BatchSuggestion
-	if err := json.Unmarshal([]byte(result), &suggestion); err != nil {
+	if err := json.Unmarshal([]byte(jsonStr), &suggestion); err != nil {
 		c.logger.Error("failed to parse batch suggestion",
 			"error", err,
 			"raw", truncateStr(result, 2000),
@@ -285,6 +297,15 @@ type streamEvent struct {
 			Text string `json:"text,omitempty"`
 		} `json:"content,omitempty"`
 	} `json:"message"`
+	// Event is the nested event inside a "stream_event" wrapper
+	// (only emitted when --include-partial-messages is passed).
+	Event struct {
+		Type  string `json:"type"`
+		Delta struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"delta"`
+	} `json:"event"`
 }
 
 // runStreamingCLI runs the CLI with stream-json output, calling OnThinking for text chunks.
@@ -297,7 +318,7 @@ func (c *ClaudeCLI) runStreamingCLI(ctx context.Context, args []string) (string,
 			streamArgs[i] = "stream-json"
 		}
 	}
-	streamArgs = append(streamArgs, "--verbose")
+	streamArgs = append(streamArgs, "--verbose", "--include-partial-messages")
 
 	cmd := exec.CommandContext(ctx, "claude", streamArgs...)
 	cmd.Env = cleanEnv()
@@ -335,14 +356,27 @@ func (c *ClaudeCLI) runStreamingCLI(ctx context.Context, args []string) (string,
 			continue
 		}
 
+		c.logger.Debug("stream event received",
+			"type", event.Type,
+			"event_type", event.Event.Type,
+			"event_delta_type", event.Event.Delta.Type,
+		)
+
 		switch event.Type {
+		case "stream_event":
+			if event.Event.Type == "content_block_delta" {
+				if (event.Event.Delta.Type == "text_delta" || event.Event.Delta.Type == "thinking_delta") && event.Event.Delta.Text != "" {
+					c.OnThinking(event.Event.Delta.Text)
+				}
+			}
 		case "content_block_delta":
+			// Fallback: direct content_block_delta (without stream_event wrapping)
 			if event.Delta.Text != "" {
 				c.OnThinking(event.Delta.Text)
 			}
 		case "assistant":
 			for _, block := range event.Message.Content {
-				if block.Type == "text" && block.Text != "" {
+				if (block.Type == "text" || block.Type == "thinking") && block.Text != "" {
 					c.OnThinking(block.Text)
 				}
 			}
@@ -413,6 +447,48 @@ func (c *ClaudeCLI) runStreamingCLI(ctx context.Context, args []string) (string,
 	}
 
 	return resultText, nil
+}
+
+// extractJSON finds and returns the first top-level JSON object in s.
+// The model may output reasoning text before/after the JSON.
+func extractJSON(s string) string {
+	// Find first '{' and match to its closing '}'
+	start := strings.Index(s, "{")
+	if start == -1 {
+		return s
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch ch {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	// No balanced closing brace found, return from start
+	return s[start:]
 }
 
 func truncateStr(s string, maxLen int) string {

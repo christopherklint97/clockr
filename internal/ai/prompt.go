@@ -9,29 +9,6 @@ import (
 	"github.com/christopherklint97/clockr/internal/clockify"
 )
 
-const jsonSchema = `{
-  "type": "object",
-  "properties": {
-    "allocations": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "project_id": {"type": "string"},
-          "project_name": {"type": "string"},
-          "client_name": {"type": "string"},
-          "minutes": {"type": "integer"},
-          "description": {"type": "string"},
-          "confidence": {"type": "number"}
-        },
-        "required": ["project_id", "project_name", "minutes", "description", "confidence"]
-      }
-    },
-    "clarification": {"type": "string"}
-  },
-  "required": ["allocations"]
-}`
-
 func buildSystemPrompt(projects []clockify.Project, interval time.Duration, contextItems []string) string {
 	type projectInfo struct {
 		ID         string `json:"id"`
@@ -62,13 +39,27 @@ Available projects:
 - Maximum 2 allocations per hour
 - Allocations must sum to exactly %d minutes
 - Use exact project IDs and names from the list above
+- Always include the client_name for each allocation (from the project list)
 - Write professional, concise descriptions suitable for Clockify time entries
 - Use git commits and PRs as additional context clues for what was worked on and which projects to assign
 - If the description is unclear, set clarification to ask for more detail and return empty allocations
 - Set confidence between 0 and 1 based on how well the description matches a project
 - If you cannot match to any project with reasonable confidence, set clarification to explain why
 
-Return valid JSON matching the required schema.`, string(projectsJSON), commitsSection, totalMinutes, totalMinutes)
+You may briefly explain your reasoning, then output a single JSON object with this exact structure:
+{
+  "allocations": [
+    {
+      "project_id": "string",
+      "project_name": "string",
+      "client_name": "string",
+      "minutes": integer,
+      "description": "string",
+      "confidence": number
+    }
+  ],
+  "clarification": "string or empty"
+}`, string(projectsJSON), commitsSection, totalMinutes, totalMinutes)
 }
 
 func formatCommitsList(commits []string) string {
@@ -84,32 +75,6 @@ func formatCommitsList(commits []string) string {
 func buildUserPrompt(description string) string {
 	return fmt.Sprintf("What I worked on: %s", description)
 }
-
-const batchJSONSchema = `{
-  "type": "object",
-  "properties": {
-    "allocations": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "date": {"type": "string"},
-          "start_time": {"type": "string"},
-          "end_time": {"type": "string"},
-          "project_id": {"type": "string"},
-          "project_name": {"type": "string"},
-          "client_name": {"type": "string"},
-          "minutes": {"type": "integer"},
-          "description": {"type": "string"},
-          "confidence": {"type": "number"}
-        },
-        "required": ["date", "start_time", "end_time", "project_id", "project_name", "minutes", "description", "confidence"]
-      }
-    },
-    "clarification": {"type": "string"}
-  },
-  "required": ["allocations"]
-}`
 
 func buildBatchSystemPrompt(projects []clockify.Project, days []DaySlot) string {
 	type projectInfo struct {
@@ -153,6 +118,7 @@ Rules:
 - Each allocation must be at least 30 minutes
 - Allocations must be contiguous within work hours (no gaps or overlaps within a day)
 - Use exact project IDs and names from the list above
+- Always include the client_name for each allocation (from the project list)
 - The "date" field must be "YYYY-MM-DD" format
 - The "start_time" and "end_time" fields must be "HH:MM" format (24h)
 - Write professional, concise descriptions suitable for Clockify time entries
@@ -161,7 +127,23 @@ Rules:
 - If the description is unclear, set clarification to ask for more detail and return empty allocations
 - Set confidence between 0 and 1 based on how well the description matches a project
 
-Return valid JSON matching the required schema.`, string(projectsJSON), schedule)
+You may briefly explain your reasoning, then output a single JSON object with this exact structure:
+{
+  "allocations": [
+    {
+      "date": "YYYY-MM-DD",
+      "start_time": "HH:MM",
+      "end_time": "HH:MM",
+      "project_id": "string",
+      "project_name": "string",
+      "client_name": "string",
+      "minutes": integer,
+      "description": "string",
+      "confidence": number
+    }
+  ],
+  "clarification": "string or empty"
+}`, string(projectsJSON), schedule)
 }
 
 func buildBatchUserPrompt(description string) string {

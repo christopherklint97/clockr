@@ -104,7 +104,7 @@ func (m editModel) updateEditing(msg tea.Msg) (editModel, tea.Cmd) {
 		query := strings.ToLower(m.textInput.Value())
 		m.filtered = nil
 		for _, p := range m.projects {
-			if strings.Contains(strings.ToLower(p.Name), query) {
+			if strings.Contains(strings.ToLower(p.Name), query) || strings.Contains(strings.ToLower(p.ClientName), query) {
 				m.filtered = append(m.filtered, p)
 			}
 		}
@@ -140,17 +140,37 @@ func (m editModel) View() string {
 
 	fieldNames := []string{"Project", "Minutes", "Description"}
 
+	// Compute column widths
+	type rowData struct {
+		project string
+		minutes string
+		desc    string
+	}
+	rows := make([]rowData, len(m.allocations))
+	maxProject := 0
+	maxMinutes := 0
 	for i, a := range m.allocations {
+		project := a.ProjectName
+		if a.ClientName != "" {
+			project = a.ProjectName + " (" + a.ClientName + ")"
+		}
+		minutes := fmt.Sprintf("%dmin", a.Minutes)
+		rows[i] = rowData{project: project, minutes: minutes, desc: a.Description}
+		if len(project) > maxProject {
+			maxProject = len(project)
+		}
+		if len(minutes) > maxMinutes {
+			maxMinutes = len(minutes)
+		}
+	}
+
+	for i, r := range rows {
 		prefix := "  "
 		if i == m.cursor {
 			prefix = "> "
 		}
 
-		projectDisplay := a.ProjectName
-		if a.ClientName != "" {
-			projectDisplay = a.ClientName + " / " + a.ProjectName
-		}
-		line := fmt.Sprintf("%s%-30s  %3dmin  %s", prefix, projectDisplay, a.Minutes, a.Description)
+		line := fmt.Sprintf("%s%-*s  %*s  %s", prefix, maxProject, r.project, maxMinutes, r.minutes, r.desc)
 		if i == m.cursor {
 			line = highlightStyle.Render(line)
 		}
@@ -173,7 +193,7 @@ func (m editModel) View() string {
 			for _, p := range m.filtered[:limit] {
 				display := p.Name
 				if p.ClientName != "" {
-					display = p.ClientName + " / " + p.Name
+					display = p.Name + " (" + p.ClientName + ")"
 				}
 				sb.WriteString(fmt.Sprintf("  %s\n", dimStyle.Render(display)))
 			}

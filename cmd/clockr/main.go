@@ -109,6 +109,7 @@ func init() {
 	logCmd.Flags().String("from", "", "Start date (YYYY-MM-DD, or natural: monday, last friday, etc.)")
 	logCmd.Flags().String("to", "", "End date (YYYY-MM-DD, or natural: friday, today, etc.)")
 	logCmd.Flags().Bool("github", false, "Include GitHub commit/PR context from saved repos")
+	logCmd.Flags().Bool("prompt-file", false, "Write prompt to file and clipboard instead of calling Claude CLI")
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
@@ -258,6 +259,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	fromStr, _ := cmd.Flags().GetString("from")
 	toStr, _ := cmd.Flags().GetString("to")
 	useGitHub, _ := cmd.Flags().GetBool("github")
+	promptFile, _ := cmd.Flags().GetBool("prompt-file")
 
 	// Validate flag combinations
 	if (fromStr != "") != (toStr != "") {
@@ -300,7 +302,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	if fromStr != "" {
-		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub, repeat, logger)
+		return runLogBatch(ctx, cfg, client, workspaceID, db, fromStr, toStr, useGitHub, repeat, promptFile, logger)
 	}
 
 	logger.Debug("fetching projects")
@@ -311,7 +313,16 @@ func runLog(cmd *cobra.Command, args []string) error {
 	logger.Debug("projects loaded", "count", len(projects))
 	enrichProjectsWithClients(ctx, client, workspaceID, projects, logger)
 
-	provider := newAIProvider(cfg, logger)
+	var provider ai.Provider
+	if promptFile {
+		var err error
+		provider, err = ai.NewPromptFileProvider(logger)
+		if err != nil {
+			return fmt.Errorf("creating prompt file provider: %w", err)
+		}
+	} else {
+		provider = newAIProvider(cfg, logger)
+	}
 	now := time.Now()
 	interval := time.Duration(cfg.Schedule.IntervalMinutes) * time.Minute
 	startTime := now.Add(-interval)
@@ -350,7 +361,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	lastInput, _ := db.GetLastRawInput()
+	lastInput, _ := db.GetState("last_description")
 	app := tui.NewApp(startTime, endTime, provider, projects, client, workspaceID, db, interval, contextItems, lastInput)
 	if repeat && lastInput != "" {
 		app.SetInitialInput(lastInput)
@@ -369,7 +380,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool, repeat bool, logger *slog.Logger) error {
+func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Client, workspaceID string, db *store.DB, fromStr, toStr string, useGitHub bool, repeat bool, promptFile bool, logger *slog.Logger) error {
 	from, err := parseDate(fromStr)
 	if err != nil {
 		return fmt.Errorf("invalid --from date: %w", err)
@@ -456,8 +467,17 @@ func runLogBatch(ctx context.Context, cfg *config.Config, client *clockify.Clien
 		}
 	}
 
-	provider := newAIProvider(cfg, logger)
-	lastInput, _ := db.GetLastRawInput()
+	var provider ai.Provider
+	if promptFile {
+		var err error
+		provider, err = ai.NewPromptFileProvider(logger)
+		if err != nil {
+			return fmt.Errorf("creating prompt file provider: %w", err)
+		}
+	} else {
+		provider = newAIProvider(cfg, logger)
+	}
+	lastInput, _ := db.GetState("last_description")
 	app := tui.NewBatchApp(days, provider, projects, client, workspaceID, db, lastInput)
 	if repeat && lastInput != "" {
 		app.SetInitialInput(lastInput)

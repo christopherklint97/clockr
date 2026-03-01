@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/christopherklint97/clockr/internal/ai"
 	"github.com/christopherklint97/clockr/internal/clockify"
 	"github.com/christopherklint97/clockr/internal/store"
@@ -59,6 +60,8 @@ type BatchApp struct {
 	loadingStartTime time.Time
 	termWidth        int
 	termHeight       int
+
+	readyCh chan struct{} // signals PromptFileProvider that user pressed Enter
 }
 
 func NewBatchApp(
@@ -109,6 +112,7 @@ func (a *BatchApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
 		a.termWidth = wsMsg.Width
 		a.termHeight = wsMsg.Height
+		a.suggestions.termWidth = wsMsg.Width
 		var cmd tea.Cmd
 		a.input, cmd = a.input.Update(wsMsg)
 		if a.state == batchLoadingView {
@@ -187,6 +191,10 @@ func (a *BatchApp) GetResult() *Result {
 func (a *BatchApp) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if keyMsg.String() == "enter" && a.input.Value() != "" {
+			// Save description immediately so it survives AI failures
+			if a.db != nil {
+				a.db.SetState("last_description", a.input.Value())
+			}
 			a.state = batchLoadingView
 			a.thinkingText = ""
 			a.loadingStartTime = time.Now()
@@ -208,6 +216,17 @@ func (a *BatchApp) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *BatchApp) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg.String() == "enter" && a.readyCh != nil {
+			select {
+			case a.readyCh <- struct{}{}:
+			default:
+			}
+			a.readyCh = nil
+			return a, nil
+		}
+	}
+
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	a.spinner, cmd = a.spinner.Update(msg)
@@ -277,6 +296,7 @@ func (a *BatchApp) handleAIResponse(msg batchAIResponseMsg) (tea.Model, tea.Cmd)
 	}
 
 	a.suggestions = newBatchSuggestionsModel(msg.suggestion)
+	a.suggestions.termWidth = a.termWidth
 	a.state = batchSuggestionView
 	return a, nil
 }
@@ -299,17 +319,27 @@ func (a *BatchApp) startAI(description string, ch chan<- string) tea.Cmd {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		resetIdle := idleTimeout(cancel, 2*time.Minute)
-
-		if cli, ok := a.provider.(*ai.ClaudeCLI); ok {
-			cli.OnThinking = func(text string) {
+		switch p := a.provider.(type) {
+		case *ai.ClaudeCLI:
+			resetIdle := idleTimeout(cancel, 2*time.Minute)
+			p.OnThinking = func(text string) {
 				resetIdle()
 				select {
 				case ch <- text:
 				default:
 				}
 			}
-			defer func() { cli.OnThinking = nil }()
+			defer func() { p.OnThinking = nil }()
+		case *ai.PromptFileProvider:
+			// No idle timeout — user manually presses Enter when ready
+			p.OnStatus = func(text string) {
+				select {
+				case ch <- text + "\n":
+				default:
+				}
+			}
+			a.readyCh = p.ReadyCh
+			defer func() { p.OnStatus = nil }()
 		}
 		defer close(ch)
 
@@ -412,6 +442,7 @@ func parseBatchTime(date, timeStr string) (time.Time, error) {
 type batchSuggestionsModel struct {
 	suggestion *ai.BatchSuggestion
 	cursor     int
+	termWidth  int
 }
 
 func newBatchSuggestionsModel(s *ai.BatchSuggestion) batchSuggestionsModel {
@@ -427,6 +458,57 @@ func (m batchSuggestionsModel) View() string {
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("Suggested Batch Allocations"))
 	sb.WriteString("\n")
+
+	// Compute column widths across all allocations
+	maxProject := 0
+	maxMinutes := 0
+	maxTimeRange := 0
+	maxDesc := 0
+	type rowData struct {
+		project    string
+		minutes    string
+		confidence string
+		timeRange  string
+		desc       string
+	}
+	rowMap := make([]rowData, len(m.suggestion.Allocations))
+	for i, a := range m.suggestion.Allocations {
+		project := a.ProjectName
+		if a.ClientName != "" {
+			project = a.ProjectName + " (" + a.ClientName + ")"
+		}
+		minutes := fmt.Sprintf("%dmin", a.Minutes)
+		confidence := fmt.Sprintf("%.0f%%", a.Confidence*100)
+		timeRange := fmt.Sprintf("%s–%s", a.StartTime, a.EndTime)
+		rowMap[i] = rowData{project: project, minutes: minutes, confidence: confidence, timeRange: timeRange, desc: a.Description}
+		maxProject = max(maxProject, len(project))
+		maxMinutes = max(maxMinutes, len(minutes))
+		maxTimeRange = max(maxTimeRange, lipgloss.Width(timeRange))
+		maxDesc = max(maxDesc, len(a.Description))
+	}
+
+	// Truncate columns to fit terminal width
+	// Layout: prefix(2) + project + gap(2) + minutes + gap(2) + confidence(4) + gap(2) + timeRange + gap(2) + desc
+	// Box overhead: border(2) + padding(2) = 4
+	if m.termWidth > 0 {
+		available := m.termWidth - 4
+		fixed := 14 + maxMinutes + maxTimeRange // prefix(2) + 4 gaps(8) + confidence(4) + minutes + timeRange
+		remaining := available - fixed
+		if remaining < maxProject+maxDesc {
+			projectCap := min(maxProject, 35)
+			descCap := remaining - projectCap
+			if descCap < 10 {
+				descCap = max(remaining/3, 5)
+				projectCap = remaining - descCap
+			}
+			maxProject = max(projectCap, 5)
+			maxDesc = max(remaining-maxProject, 0)
+			for i, r := range rowMap {
+				rowMap[i].project = truncate(r.project, maxProject)
+				rowMap[i].desc = truncate(r.desc, maxDesc)
+			}
+		}
+	}
 
 	// Group allocations by date for display
 	type dayGroup struct {
@@ -461,26 +543,19 @@ func (m batchSuggestionsModel) View() string {
 		sb.WriteString("\n")
 
 		for _, allocIdx := range g.allocations {
-			a := m.suggestion.Allocations[allocIdx]
+			r := rowMap[allocIdx]
 			prefix := "  "
 			if globalIdx == m.cursor {
 				prefix = "> "
 			}
 
-			projectDisplay := a.ProjectName
-			if a.ClientName != "" {
-				projectDisplay = a.ClientName + " / " + a.ProjectName
-			}
-
-			confidence := fmt.Sprintf("%.0f%%", a.Confidence*100)
-			line := fmt.Sprintf("%s%-30s  %3dmin  %s  %s–%s  %s",
+			line := fmt.Sprintf("%s%-*s  %*s  %s  %s  %s",
 				prefix,
-				projectDisplay,
-				a.Minutes,
-				dimStyle.Render(confidence),
-				a.StartTime,
-				a.EndTime,
-				a.Description,
+				maxProject, r.project,
+				maxMinutes, r.minutes,
+				dimStyle.Render(fmt.Sprintf("%4s", r.confidence)),
+				r.timeRange,
+				r.desc,
 			)
 
 			if globalIdx == m.cursor {
@@ -603,7 +678,7 @@ func (m batchEditModel) updateEditing(msg tea.Msg) (batchEditModel, tea.Cmd) {
 		query := strings.ToLower(m.textInput.Value())
 		m.filtered = nil
 		for _, p := range m.projects {
-			if strings.Contains(strings.ToLower(p.Name), query) {
+			if strings.Contains(strings.ToLower(p.Name), query) || strings.Contains(strings.ToLower(p.ClientName), query) {
 				m.filtered = append(m.filtered, p)
 			}
 		}
@@ -647,18 +722,40 @@ func (m batchEditModel) View() string {
 
 	fieldNames := []string{"Project", "Minutes", "Description", "Start Time", "End Time"}
 
+	// Compute column widths
+	type editRow struct {
+		date      string
+		project   string
+		minutes   string
+		timeRange string
+		desc      string
+	}
+	editRows := make([]editRow, len(m.allocations))
+	maxEditProject := 0
+	maxEditMinutes := 0
 	for i, a := range m.allocations {
+		project := a.ProjectName
+		if a.ClientName != "" {
+			project = a.ProjectName + " (" + a.ClientName + ")"
+		}
+		minutes := fmt.Sprintf("%dmin", a.Minutes)
+		editRows[i] = editRow{date: a.Date, project: project, minutes: minutes, timeRange: fmt.Sprintf("%s–%s", a.StartTime, a.EndTime), desc: a.Description}
+		if len(project) > maxEditProject {
+			maxEditProject = len(project)
+		}
+		if len(minutes) > maxEditMinutes {
+			maxEditMinutes = len(minutes)
+		}
+	}
+
+	for i, r := range editRows {
 		prefix := "  "
 		if i == m.cursor {
 			prefix = "> "
 		}
 
-		projectDisplay := a.ProjectName
-		if a.ClientName != "" {
-			projectDisplay = a.ClientName + " / " + a.ProjectName
-		}
-		line := fmt.Sprintf("%s%s %-30s  %3dmin  %s–%s  %s",
-			prefix, a.Date, projectDisplay, a.Minutes, a.StartTime, a.EndTime, a.Description)
+		line := fmt.Sprintf("%s%s %-*s  %*s  %s  %s",
+			prefix, r.date, maxEditProject, r.project, maxEditMinutes, r.minutes, r.timeRange, r.desc)
 		if i == m.cursor {
 			line = highlightStyle.Render(line)
 		}
@@ -681,7 +778,7 @@ func (m batchEditModel) View() string {
 			for _, p := range m.filtered[:limit] {
 				display := p.Name
 				if p.ClientName != "" {
-					display = p.ClientName + " / " + p.Name
+					display = p.Name + " (" + p.ClientName + ")"
 				}
 				sb.WriteString(fmt.Sprintf("  %s\n", dimStyle.Render(display)))
 			}

@@ -76,6 +76,8 @@ type App struct {
 	loadingStartTime time.Time
 	termWidth        int
 	termHeight       int
+
+	readyCh chan struct{} // signals PromptFileProvider that user pressed Enter
 }
 
 func NewApp(
@@ -129,6 +131,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
 		a.termWidth = wsMsg.Width
 		a.termHeight = wsMsg.Height
+		a.suggestions.termWidth = wsMsg.Width
 		var cmd tea.Cmd
 		a.input, cmd = a.input.Update(wsMsg)
 		if a.state == loadingView {
@@ -207,6 +210,10 @@ func (a *App) GetResult() *Result {
 func (a *App) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if keyMsg.String() == "enter" && a.input.Value() != "" {
+			// Save description immediately so it survives AI failures
+			if a.db != nil {
+				a.db.SetState("last_description", a.input.Value())
+			}
 			a.state = loadingView
 			a.thinkingText = ""
 			a.loadingStartTime = time.Now()
@@ -228,6 +235,17 @@ func (a *App) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg.String() == "enter" && a.readyCh != nil {
+			select {
+			case a.readyCh <- struct{}{}:
+			default:
+			}
+			a.readyCh = nil
+			return a, nil
+		}
+	}
+
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	a.spinner, cmd = a.spinner.Update(msg)
@@ -297,6 +315,7 @@ func (a *App) handleAIResponse(msg aiResponseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	a.suggestions = newSuggestionsModel(msg.suggestion)
+	a.suggestions.termWidth = a.termWidth
 	a.state = suggestionView
 	return a, nil
 }
@@ -319,17 +338,27 @@ func (a *App) startAI(description string, ch chan<- string) tea.Cmd {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		resetIdle := idleTimeout(cancel, 2*time.Minute)
-
-		if cli, ok := a.provider.(*ai.ClaudeCLI); ok {
-			cli.OnThinking = func(text string) {
+		switch p := a.provider.(type) {
+		case *ai.ClaudeCLI:
+			resetIdle := idleTimeout(cancel, 2*time.Minute)
+			p.OnThinking = func(text string) {
 				resetIdle()
 				select {
 				case ch <- text:
 				default:
 				}
 			}
-			defer func() { cli.OnThinking = nil }()
+			defer func() { p.OnThinking = nil }()
+		case *ai.PromptFileProvider:
+			// No idle timeout — user manually presses Enter when ready
+			p.OnStatus = func(text string) {
+				select {
+				case ch <- text + "\n":
+				default:
+				}
+			}
+			a.readyCh = p.ReadyCh
+			defer func() { p.OnStatus = nil }()
 		}
 		defer close(ch)
 

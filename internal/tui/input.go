@@ -18,7 +18,7 @@ func newInputModel(timeInfo string) inputModel {
 	ta := textarea.New()
 	ta.Placeholder = "Describe what you worked on..."
 	ta.Focus()
-	ta.CharLimit = 5000
+	ta.CharLimit = 0 // unlimited
 	ta.SetWidth(76)
 	ta.SetHeight(15)
 	ta.ShowLineNumbers = false
