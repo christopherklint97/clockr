@@ -248,7 +248,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	provider := newAIProvider(cfg, logger)
+	var provider ai.Provider
+	if cfg.AI.PromptFile {
+		provider, err = ai.NewPromptFileProvider(logger)
+		if err != nil {
+			return fmt.Errorf("creating prompt file provider: %w", err)
+		}
+	} else {
+		provider = newAIProvider(cfg, logger)
+	}
 	sched := scheduler.New(cfg, client, db, provider, workspaceID)
 
 	// Handle graceful shutdown
@@ -330,6 +338,16 @@ func runLog(cmd *cobra.Command, args []string) error {
 	useGitHub, _ := cmd.Flags().GetBool("github")
 	promptFile, _ := cmd.Flags().GetBool("prompt-file")
 
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	// Config sets the default; flag overrides
+	if cfg.AI.PromptFile {
+		promptFile = true
+	}
+
 	// Validate flag combinations
 	if (fromStr != "") != (toStr != "") {
 		return fmt.Errorf("both --from and --to must be provided together")
@@ -342,11 +360,6 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	if same && repeat {
 		return fmt.Errorf("--same cannot be combined with --repeat")
-	}
-
-	cfg, err := loadConfig()
-	if err != nil {
-		return err
 	}
 
 	db, err := store.Open()
@@ -859,6 +872,7 @@ work_days = [1, 2, 3, 4, 5]
 provider = "%s"
 model = "%s"
 # api_key = ""  # or set OPENROUTER_API_KEY env var
+# prompt_file = false  # set to true to always use prompt-file mode
 
 [notifications]
 enabled = %t

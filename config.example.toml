@@ -12,6 +12,7 @@ work_days = [1, 2, 3, 4, 5]  # Monday=1 through Friday=5
 provider = "openrouter"  # "openrouter" (default)
 model = "anthropic/claude-sonnet-4-6"
 # api_key = ""  # or set OPENROUTER_API_KEY env var
+# prompt_file = false  # set to true to always use prompt-file mode
 
 [notifications]
 enabled = true

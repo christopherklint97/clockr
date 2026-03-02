@@ -40,6 +40,7 @@ type AIConfig struct {
 	Model            string `toml:"model"`
 	APIKey           string `toml:"api_key"`
 	OpenRouterAPIKey string `toml:"openrouter_api_key"`
+	PromptFile       bool   `toml:"prompt_file"`
 }
 
 type NotifyConfig struct {
