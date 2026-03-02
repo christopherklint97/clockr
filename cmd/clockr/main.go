@@ -61,6 +61,12 @@ var projectsCmd = &cobra.Command{
 	RunE:  runProjects,
 }
 
+var clearFailedCmd = &cobra.Command{
+	Use:   "clear-failed",
+	Short: "Delete all failed time entries from the local database",
+	RunE:  runClearFailed,
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Open config file in your editor",
@@ -116,6 +122,7 @@ func init() {
 	rootCmd.AddCommand(logCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(projectsCmd)
+	rootCmd.AddCommand(clearFailedCmd)
 	rootCmd.AddCommand(configCmd)
 
 	calendarCmd.AddCommand(calendarTestCmd)
@@ -271,6 +278,47 @@ func runStop(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Sent stop signal to clockr (PID %d)\n", pid)
+	return nil
+}
+
+func runClearFailed(cmd *cobra.Command, args []string) error {
+	db, err := store.Open()
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+	defer db.Close()
+
+	// Show failed entries first
+	entries, err := db.GetFailedEntries()
+	if err != nil {
+		return fmt.Errorf("fetching failed entries: %w", err)
+	}
+	if len(entries) == 0 {
+		fmt.Println("No failed entries.")
+		return nil
+	}
+
+	fmt.Printf("Found %d failed entries:\n\n", len(entries))
+	for _, e := range entries {
+		projectDisplay := e.ProjectName
+		if e.ClientName != "" {
+			projectDisplay = e.ProjectName + " (" + e.ClientName + ")"
+		}
+		fmt.Printf("  #%d  %s  %dmin  %s  %s\n",
+			e.ID,
+			e.StartTime.Local().Format("2006-01-02 15:04"),
+			e.Minutes,
+			projectDisplay,
+			e.Description,
+		)
+	}
+
+	deleted, err := db.DeleteFailedEntries()
+	if err != nil {
+		return fmt.Errorf("clearing failed entries: %w", err)
+	}
+
+	fmt.Printf("\nDeleted %d failed entries.\n", deleted)
 	return nil
 }
 

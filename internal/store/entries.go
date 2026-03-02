@@ -93,6 +93,14 @@ func (db *DB) GetLastRawInput() (string, error) {
 	return rawInput.String, nil
 }
 
+func (db *DB) DeleteFailedEntries() (int64, error) {
+	result, err := db.Exec("DELETE FROM entries WHERE status = 'failed'")
+	if err != nil {
+		return 0, fmt.Errorf("deleting failed entries: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 func (db *DB) GetFailedEntries() ([]Entry, error) {
 	return db.queryEntries(
 		`SELECT id, clockify_id, project_id, project_name, client_name, description, start_time, end_time, minutes, status, raw_input, created_at
