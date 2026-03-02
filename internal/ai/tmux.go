@@ -94,7 +94,48 @@ func findClaudeCodePane(logger *slog.Logger) (string, error) {
 		}
 	}
 
-	// Fallback: check pane content for claude prompt (current window only)
+	// Second pass: check if a "claude" process is running on each pane's TTY.
+	// Claude Code sets its process title to the version number (e.g. "2.1.63"),
+	// so pane_current_command won't match "claude". Checking the TTY is more reliable.
+	cmd = exec.Command("tmux", "list-panes", "-F", "#{pane_id} #{pane_tty}")
+	out, err = cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("listing pane TTYs: %w", err)
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		paneID := parts[0]
+		paneTTY := parts[1]
+
+		if paneID == currentPane {
+			continue
+		}
+
+		// Strip /dev/ prefix to match ps TTY format (e.g. "/dev/ttys021" → "ttys021")
+		ttyShort := strings.TrimPrefix(paneTTY, "/dev/")
+
+		psCmd := exec.Command("ps", "-t", ttyShort, "-o", "comm=")
+		psOut, err := psCmd.Output()
+		if err != nil {
+			continue
+		}
+
+		for _, proc := range strings.Split(string(psOut), "\n") {
+			if strings.TrimSpace(proc) == "claude" {
+				logger.Debug("matched Claude Code pane by TTY process",
+					"pane_id", paneID,
+					"tty", paneTTY,
+				)
+				return paneID, nil
+			}
+		}
+	}
+
+	// Last resort: check pane content for claude prompt (current window only)
 	cmd = exec.Command("tmux", "list-panes", "-F", "#{pane_id}")
 	out, err = cmd.Output()
 	if err != nil {
