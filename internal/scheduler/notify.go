@@ -60,6 +60,10 @@ func showDarwinDialog(ctx context.Context, title, message string, snoozeOptions 
 
 	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	out, err := cmd.Output()
+
+	// Re-activate the terminal app so focus returns there instead of Script Editor.
+	activateTerminal()
+
 	if err != nil {
 		// If the user closed the dialog (e.g. Escape/Cmd+.), treat as Log Now
 		// so we don't silently skip prompts.
@@ -84,6 +88,44 @@ func showDarwinDialog(ctx context.Context, title, message string, snoozeOptions 
 	}
 
 	return DialogResult{Action: ActionLogNow}, nil
+}
+
+// activateTerminal re-focuses the user's terminal app after an osascript dialog.
+// Without this, macOS gives focus to Script Editor instead.
+func activateTerminal() {
+	app := terminalApp()
+	if app == "" {
+		return
+	}
+	script := fmt.Sprintf(`tell application %q to activate`, app)
+	exec.Command("osascript", "-e", script).Run() //nolint:errcheck
+}
+
+// terminalApp returns the name of the running terminal application.
+func terminalApp() string {
+	switch os.Getenv("TERM_PROGRAM") {
+	case "Apple_Terminal":
+		return "Terminal"
+	case "iTerm.app":
+		return "iTerm"
+	case "WezTerm":
+		return "WezTerm"
+	case "ghostty":
+		return "Ghostty"
+	case "tmux":
+		// Running inside tmux; check the outer terminal.
+		if outer := os.Getenv("LC_TERMINAL"); outer != "" {
+			switch outer {
+			case "iTerm2":
+				return "iTerm"
+			}
+		}
+		// Fallback: most macOS tmux users are in Terminal.app.
+		return "Terminal"
+	default:
+		// Best-effort: try Terminal.app as the macOS default.
+		return "Terminal"
+	}
 }
 
 func showLinuxDialog(ctx context.Context, title, message string, snoozeOptions []int) (DialogResult, error) {
