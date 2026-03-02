@@ -102,6 +102,10 @@ func (s *Scheduler) showDialogWithSnooze(ctx context.Context) DialogAction {
 
 func (s *Scheduler) prompt(ctx context.Context, tickTime time.Time, interval time.Duration) {
 	if s.cfg.Notifications.Enabled {
+		// Send a system notification first so the user gets a banner + sound
+		// even if the interactive dialog appears behind other windows.
+		_ = SendNotification("clockr", "Time to log your work!")
+
 		action := s.showDialogWithSnooze(ctx)
 		if action == ActionNextTimer {
 			fmt.Println("Skipped to next timer.")
