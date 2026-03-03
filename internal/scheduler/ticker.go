@@ -18,11 +18,12 @@ import (
 )
 
 type Scheduler struct {
-	cfg         *config.Config
-	client      *clockify.Client
-	db          *store.DB
-	provider    ai.Provider
-	workspaceID string
+	cfg               *config.Config
+	client            *clockify.Client
+	db                *store.DB
+	provider          ai.Provider
+	workspaceID       string
+	skipWorkTimeCheck bool
 }
 
 func New(cfg *config.Config, client *clockify.Client, db *store.DB, provider ai.Provider, workspaceID string) *Scheduler {
@@ -33,6 +34,10 @@ func New(cfg *config.Config, client *clockify.Client, db *store.DB, provider ai.
 		provider:    provider,
 		workspaceID: workspaceID,
 	}
+}
+
+func (s *Scheduler) SetSkipWorkTimeCheck(skip bool) {
+	s.skipWorkTimeCheck = skip
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
@@ -46,8 +51,12 @@ func (s *Scheduler) Run(ctx context.Context) error {
 
 	interval := time.Duration(s.cfg.Schedule.IntervalMinutes) * time.Minute
 
-	fmt.Printf("Scheduler started (interval: %s, hours: %s–%s)\n",
-		interval, s.cfg.Schedule.WorkStart, s.cfg.Schedule.WorkEnd)
+	if s.skipWorkTimeCheck {
+		fmt.Printf("Scheduler started (interval: %s, work hours overridden)\n", interval)
+	} else {
+		fmt.Printf("Scheduler started (interval: %s, hours: %s–%s)\n",
+			interval, s.cfg.Schedule.WorkStart, s.cfg.Schedule.WorkEnd)
+	}
 
 	for {
 		nextTick := s.nextAlignedTick(time.Now(), interval)
@@ -60,7 +69,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		case <-time.After(time.Until(nextTick)):
 		}
 
-		if !s.isWorkTime(time.Now()) {
+		if !s.skipWorkTimeCheck && !s.isWorkTime(time.Now()) {
 			continue
 		}
 
@@ -167,14 +176,15 @@ func (s *Scheduler) nextAlignedTick(now time.Time, interval time.Duration) time.
 	return next
 }
 
-func (s *Scheduler) isWorkTime(t time.Time) bool {
+// IsWorkTime checks whether the given time falls within configured work hours and work days.
+func IsWorkTime(cfg *config.Config, t time.Time) bool {
 	weekday := int(t.Weekday())
 	if weekday == 0 {
 		weekday = 7 // Sunday = 7
 	}
 
 	isWorkDay := false
-	for _, d := range s.cfg.Schedule.WorkDays {
+	for _, d := range cfg.Schedule.WorkDays {
 		if d == weekday {
 			isWorkDay = true
 			break
@@ -184,14 +194,18 @@ func (s *Scheduler) isWorkTime(t time.Time) bool {
 		return false
 	}
 
-	startH, startM := parseTime(s.cfg.Schedule.WorkStart)
-	endH, endM := parseTime(s.cfg.Schedule.WorkEnd)
+	startH, startM := parseTime(cfg.Schedule.WorkStart)
+	endH, endM := parseTime(cfg.Schedule.WorkEnd)
 
 	nowMins := t.Hour()*60 + t.Minute()
 	startMins := startH*60 + startM
 	endMins := endH*60 + endM
 
 	return nowMins >= startMins && nowMins <= endMins
+}
+
+func (s *Scheduler) isWorkTime(t time.Time) bool {
+	return IsWorkTime(s.cfg, t)
 }
 
 func parseTime(s string) (int, int) {

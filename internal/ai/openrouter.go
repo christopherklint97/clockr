@@ -176,7 +176,7 @@ func (o *OpenRouterProvider) call(ctx context.Context, systemPrompt, userPrompt 
 }
 
 func (o *OpenRouterProvider) callBuffered(ctx context.Context, params openai.ChatCompletionNewParams, startTime time.Time) (string, error) {
-	resp, err := o.client.Chat.Completions.New(ctx, params)
+	resp, err := o.client.Chat.Completions.New(ctx, params, option.WithJSONSet("provider.zdr", true))
 	elapsed := time.Since(startTime)
 
 	if err != nil {
@@ -200,7 +200,7 @@ func (o *OpenRouterProvider) callBuffered(ctx context.Context, params openai.Cha
 }
 
 func (o *OpenRouterProvider) callStreaming(ctx context.Context, params openai.ChatCompletionNewParams, startTime time.Time) (string, error) {
-	stream := o.client.Chat.Completions.NewStreaming(ctx, params)
+	stream := o.client.Chat.Completions.NewStreaming(ctx, params, option.WithJSONSet("provider.zdr", true))
 	defer stream.Close()
 
 	var resultText string

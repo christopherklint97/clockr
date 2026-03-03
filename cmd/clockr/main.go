@@ -259,6 +259,23 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	sched := scheduler.New(cfg, client, db, provider, workspaceID)
 
+	// Check if outside work hours and prompt for confirmation
+	if !scheduler.IsWorkTime(cfg, time.Now()) {
+		msg := fmt.Sprintf("Work hours are %s–%s. Start the scheduler anyway?",
+			cfg.Schedule.WorkStart, cfg.Schedule.WorkEnd)
+		confirm := tui.NewConfirmApp(msg)
+		p := tea.NewProgram(confirm)
+		if _, err := p.Run(); err != nil {
+			return fmt.Errorf("running confirmation: %w", err)
+		}
+		result := confirm.GetResult()
+		if result == nil || !result.Confirmed {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+		sched.SetSkipWorkTimeCheck(true)
+	}
+
 	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

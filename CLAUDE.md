@@ -47,9 +47,10 @@ internal/
     suggestions.go            — Suggestion display with accept/edit/retry/skip
     edit.go                   — Inline allocation editor with fuzzy project search
     repopicker.go             — Searchable multi-select repo picker for GitHub integration
+    confirm.go                — Work-hours override confirmation TUI (Start anyway / Cancel)
     styles.go                 — Lipgloss style definitions
   scheduler/
-    ticker.go                 — Work-hours-aware tick loop, PID file, failed entry retry
+    ticker.go                 — Work-hours-aware tick loop, PID file, failed entry retry, IsWorkTime export
     notify.go                 — Platform-aware prompt dialog (macOS osascript, Linux zenity/kdialog, terminal fallback) with snooze support
 ```
 
@@ -70,6 +71,7 @@ internal/
 - `--repeat` flag (and Ctrl+R in TUI) reuses the last description without re-typing
 - `--prompt-file` flag writes the AI prompt to `~/.config/clockr/tmp/clockr_prompt.md` and clipboard instead of calling the AI API; if running in tmux, auto-injects into an adjacent Claude Code pane; waits for user to press Enter after the response is written to `~/.config/clockr/tmp/clockr_response.json`
 - Scheduler notifications show a platform-aware dialog (Log Now / Snooze / Next Timer); snooze durations configured via `snooze_options` in `[notifications]`; `enabled = false` skips the dialog
+- `clockr start` outside work hours shows a TUI confirmation; if overridden, `skipWorkTimeCheck` bypasses work-hours gating for the entire session
 - All runtime files (config, DB, PID, tokens, temp prompt/response) are stored under `~/.config/clockr/`
 
 ## Testing

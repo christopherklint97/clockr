@@ -190,7 +190,7 @@ Instead of calling the AI API directly, writes the AI prompt to `~/.config/clock
 clockr start
 ```
 
-Runs in the foreground (use tmux/screen to background). Prompts you at each interval during work hours with a dialog and TUI.
+Runs in the foreground (use tmux/screen to background). Prompts you at each interval during work hours with a dialog and TUI. If you start the scheduler outside work hours, a confirmation prompt lets you override and receive prompts regardless of work hours for that session.
 
 #### Notification dialog
 
