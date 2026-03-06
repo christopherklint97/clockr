@@ -24,6 +24,7 @@ type Scheduler struct {
 	provider          ai.Provider
 	workspaceID       string
 	skipWorkTimeCheck bool
+	tmuxTarget        *TmuxTarget
 }
 
 func New(cfg *config.Config, client *clockify.Client, db *store.DB, provider ai.Provider, workspaceID string) *Scheduler {
@@ -33,6 +34,7 @@ func New(cfg *config.Config, client *clockify.Client, db *store.DB, provider ai.
 		db:          db,
 		provider:    provider,
 		workspaceID: workspaceID,
+		tmuxTarget:  DetectTmuxTarget(),
 	}
 }
 
@@ -113,7 +115,7 @@ func (s *Scheduler) prompt(ctx context.Context, tickTime time.Time, interval tim
 	if s.cfg.Notifications.Enabled {
 		// Send a system notification first so the user gets a banner + sound
 		// even if the interactive dialog appears behind other windows.
-		_ = SendNotification("clockr", "Time to log your work!")
+		_ = SendNotification("clockr", "Time to log your work!", s.tmuxTarget)
 
 		action := s.showDialogWithSnooze(ctx)
 		if action == ActionNextTimer {
