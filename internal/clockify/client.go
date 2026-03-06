@@ -186,6 +186,24 @@ func (c *Client) GetClients(ctx context.Context, workspaceID string) ([]Clockify
 	return clients, nil
 }
 
+// EnrichProjectsWithClients populates ClientName on each project by fetching
+// the workspace client list. Silently continues if the fetch fails.
+func (c *Client) EnrichProjectsWithClients(ctx context.Context, workspaceID string, projects []Project) {
+	clients, err := c.GetClients(ctx, workspaceID)
+	if err != nil {
+		return
+	}
+	clientMap := make(map[string]string, len(clients))
+	for _, cl := range clients {
+		clientMap[cl.ID] = cl.Name
+	}
+	for i := range projects {
+		if name, ok := clientMap[projects[i].ClientID]; ok {
+			projects[i].ClientName = name
+		}
+	}
+}
+
 func (c *Client) CreateTimeEntry(ctx context.Context, workspaceID string, entry TimeEntryRequest) (*TimeEntry, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspace ID is empty — set workspace_id in config or CLOCKIFY_WORKSPACE_ID env var")

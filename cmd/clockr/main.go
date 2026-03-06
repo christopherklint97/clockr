@@ -207,23 +207,8 @@ func newAIProvider(cfg *config.Config, logger *slog.Logger) ai.Provider {
 
 func enrichProjectsWithClients(ctx context.Context, client *clockify.Client, workspaceID string, projects []clockify.Project, logger *slog.Logger) {
 	logger.Debug("fetching clients")
-	clients, err := client.GetClients(ctx, workspaceID)
-	if err != nil {
-		logger.Debug("failed to fetch clients, continuing without client names", "error", err)
-		return
-	}
-	logger.Debug("clients loaded", "count", len(clients))
-
-	clientMap := make(map[string]string, len(clients))
-	for _, c := range clients {
-		clientMap[c.ID] = c.Name
-	}
-
-	for i := range projects {
-		if name, ok := clientMap[projects[i].ClientID]; ok {
-			projects[i].ClientName = name
-		}
-	}
+	client.EnrichProjectsWithClients(ctx, workspaceID, projects)
+	logger.Debug("clients enriched")
 }
 
 func runStart(cmd *cobra.Command, args []string) error {

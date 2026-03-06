@@ -129,6 +129,7 @@ func (s *Scheduler) prompt(ctx context.Context, tickTime time.Time, interval tim
 		fmt.Printf("Error fetching projects: %v\n", err)
 		return
 	}
+	s.client.EnrichProjectsWithClients(ctx, s.workspaceID, projects)
 
 	startTime := tickTime.Add(-interval)
 	endTime := tickTime
