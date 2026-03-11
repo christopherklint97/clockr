@@ -198,6 +198,9 @@ func (a *App) View() string {
 		if _, ok := a.provider.(*ai.PromptFileProvider); ok {
 			label = "Waiting for response..."
 		}
+		if a.input.autoAccept {
+			label += " (auto-accept)"
+		}
 		header := fmt.Sprintf("%s %s  %s", a.spinner.View(), label, dimStyle.Render(formatElapsed(elapsed)))
 		separator := dimStyle.Render(strings.Repeat("─", a.termWidth))
 		return header + "\n" + separator + "\n" + a.viewport.View()
@@ -351,6 +354,11 @@ func (a *App) handleAIResponse(msg aiResponseMsg) (tea.Model, tea.Cmd) {
 		a.state = confirmationView
 		a.errMsg = msg.err.Error()
 		return a, nil
+	}
+
+	// Auto-accept: skip suggestion review if toggled on and no clarification needed
+	if a.input.autoAccept && msg.suggestion.Clarification == "" {
+		return a, a.submitAllocations(msg.suggestion.Allocations)
 	}
 
 	a.suggestions = newSuggestionsModel(msg.suggestion)

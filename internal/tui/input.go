@@ -12,6 +12,7 @@ type inputModel struct {
 	height        int
 	lastInput     string // previous description available via Ctrl+R
 	loadedLastMsg bool   // true after Ctrl+R was used (for transient feedback)
+	autoAccept    bool   // when true, auto-accept AI suggestion without review
 }
 
 func newInputModel(timeInfo string) inputModel {
@@ -49,6 +50,10 @@ func (m inputModel) Update(msg tea.Msg) (inputModel, tea.Cmd) {
 			m.loadedLastMsg = true
 			return m, nil
 		}
+		if keyMsg.String() == "tab" {
+			m.autoAccept = !m.autoAccept
+			return m, nil
+		}
 	}
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
@@ -58,11 +63,15 @@ func (m inputModel) Update(msg tea.Msg) (inputModel, tea.Cmd) {
 func (m inputModel) View() string {
 	header := titleStyle.Render("clockr — Time Entry")
 	timeLabel := subtitleStyle.Render(m.timeInfo)
-	helpParts := "Enter: submit • Ctrl+C: cancel"
-	if m.lastInput != "" {
-		helpParts += " • Ctrl+R: load last description"
+	autoLabel := dimStyle.Render("off")
+	if m.autoAccept {
+		autoLabel = selectedStyle.Render("ON")
 	}
-	help := helpStyle.Render(helpParts)
+	helpText := dimStyle.Render("Enter: submit • Tab: auto-accept ") + autoLabel + dimStyle.Render(" • Ctrl+C: cancel")
+	if m.lastInput != "" {
+		helpText += dimStyle.Render(" • Ctrl+R: load last")
+	}
+	help := helpText
 
 	return header + "\n" + timeLabel + "\n" + m.textarea.View() + "\n" + help
 }
