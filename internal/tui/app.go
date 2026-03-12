@@ -376,6 +376,12 @@ func (a *App) handleSubmit(msg submitMsg) (tea.Model, tea.Cmd) {
 
 	a.result = &Result{Entries: msg.entries}
 	a.state = confirmationView
+
+	// Auto-accept: skip confirmation screen and quit immediately
+	if a.input.autoAccept {
+		return a, tea.Quit
+	}
+
 	return a, nil
 }
 

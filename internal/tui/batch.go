@@ -322,6 +322,12 @@ func (a *BatchApp) handleSubmit(msg batchSubmitMsg) (tea.Model, tea.Cmd) {
 
 	a.result = &Result{Entries: msg.entries}
 	a.state = batchConfirmationView
+
+	// Auto-accept: skip confirmation screen and quit immediately
+	if a.input.autoAccept {
+		return a, tea.Quit
+	}
+
 	return a, nil
 }
 
