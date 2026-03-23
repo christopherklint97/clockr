@@ -98,8 +98,9 @@ func (o *OpenRouterProvider) MatchProjects(ctx context.Context, description stri
 		"result", truncateStr(result, 2000),
 	)
 
+	jsonStr := extractJSON(result)
 	var suggestion Suggestion
-	if err := json.Unmarshal([]byte(result), &suggestion); err != nil {
+	if err := json.Unmarshal([]byte(jsonStr), &suggestion); err != nil {
 		o.logger.Error("failed to parse suggestion", "error", err, "raw", truncateStr(result, 2000))
 		return nil, fmt.Errorf("parsing suggestion: %w (raw: %s)", err, truncateStr(result, 1000))
 	}
@@ -133,8 +134,9 @@ func (o *OpenRouterProvider) MatchProjectsBatch(ctx context.Context, description
 		"result", truncateStr(result, 2000),
 	)
 
+	jsonStr := extractJSON(result)
 	var suggestion BatchSuggestion
-	if err := json.Unmarshal([]byte(result), &suggestion); err != nil {
+	if err := json.Unmarshal([]byte(jsonStr), &suggestion); err != nil {
 		o.logger.Error("failed to parse batch suggestion", "error", err, "raw", truncateStr(result, 2000))
 		return nil, fmt.Errorf("parsing batch suggestion: %w (raw: %s)", err, truncateStr(result, 1000))
 	}
@@ -234,7 +236,7 @@ func (o *OpenRouterProvider) callStreaming(ctx context.Context, params openai.Ch
 	if resultText == "" {
 		return "", fmt.Errorf("no text content received from OpenRouter API")
 	}
-	return resultText, nil
+	return extractJSON(resultText), nil
 }
 
 // VerifyOpenRouterAPIKey checks that the OpenRouter API key is available.
